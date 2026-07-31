@@ -1784,16 +1784,21 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
       const petic = `<script>
       (function(){
         var CHEIE=${JSON.stringify(cheieCamara)};
+        var ADRESA_GAZDA=${JSON.stringify(location.href.split('#')[0])};
         function raporteaza(text){
           try{ parent.postMessage({logosEroare:CHEIE, text:String(text).slice(0,600)},'*'); }catch(e){}
         }
         // orice eroare netratată din oaspete ajunge la Logos, altfel moare în tăcere
         window.addEventListener('error', function(ev){
           if(ev.target && ev.target!==window && ev.target.src){
-            raporteaza('nu s-a putut încărca: '+ev.target.src);   // script/imagine externă
-          } else {
-            raporteaza((ev.message||'eroare')+'  ('+(ev.filename||'srcdoc')+':'+(ev.lineno||'?')+')');
+            var u=String(ev.target.src||'');
+            // un src gol se rezolvă la adresa documentului gazdă: zgomot, nu defect
+            if(!u || u.split('#')[0]===ADRESA_GAZDA) return;
+            raporteaza('nu s-a putut încărca: '+u);
+            return;
           }
+          if(!ev.message && !ev.error) return;
+          raporteaza((ev.message||'eroare')+'  ('+(ev.filename||'srcdoc')+':'+(ev.lineno||'?')+')');
         }, true);
         window.addEventListener('unhandledrejection', function(ev){
           var m=ev.reason; raporteaza('promisiune respinsă: '+((m&&(m.message||m))||'necunoscut'));

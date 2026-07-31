@@ -39,8 +39,15 @@
   }
   window.__dcEroare=arata;
   window.addEventListener('error', function(ev){
-    if(ev.target && ev.target!==window && ev.target.src) arata('nu s-a incarcat: '+ev.target.src);
-    else arata((ev.message||'eroare')+'  (linia '+(ev.lineno||'?')+')');
+    if(ev.target && ev.target!==window && ev.target.src){
+      var u=String(ev.target.src||'');
+      // un src gol se rezolva la adresa paginii insesi: zgomot, nu defect
+      if(!u || u.split('#')[0]===location.href.split('#')[0]) return;
+      arata('nu s-a incarcat: '+u);
+      return;
+    }
+    if(!ev.message && !ev.error) return;          // erori fara continut: le sarim
+    arata((ev.message||'eroare')+'  (linia '+(ev.lineno||'?')+')');
   }, true);
   window.addEventListener('unhandledrejection', function(ev){
     var m=ev.reason;
