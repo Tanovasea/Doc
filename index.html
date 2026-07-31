@@ -1674,6 +1674,15 @@ const Proprietate = (()=>{
   return {cine, revendica, elibereaza, arePermisiune, permite, harta, granturi};
 })();
 
+/* ---------- FEREASTRĂ CĂTRE APLICAȚIILE INTERNE ----------
+   Modulele de mai sus sunt declarate cu `const`, iar `const` la nivel de script
+   NU devine proprietate a lui window. O aplicație internă (iframe, același
+   origin) ajunge la ele prin `window.parent`, deci trebuie așezate explicit
+   acolo. Fără linia asta, `parent.Depozit` e undefined și aplicația pornește
+   frumos, dar nu poate salva nimic — fără niciun semn că ceva e greșit. */
+window.Cripto=Cripto; window.Depozit=Depozit; window.Memorie=Memorie;
+window.Nucleu=Nucleu; window.Proprietate=Proprietate;
+
 /* ============================================================
    PUNTEA OASPETE ↔ SISTEM
    Orice aplicație .html rulează ca oaspete într-o fereastră Logos.
