@@ -609,10 +609,20 @@
    "verificator" criptat rămân pe disc, ca să putem verifica o parolă
    introdusă ulterior fără să știm parola în sine. */
 const Cripto = (()=>{
-  const CHEIE_LS='logos_lacat';           // {sare, verificator, iteratii}
-  const PREFIX='LZE1:';                    // marchează conținut criptat cu formatul curent
+  const CHEIE_LS='logos_lacat';            // {sare, verificator, iteratii}
+  const CHEIE_MIG='logos_migrare';         // există DOAR cât timp o schimbare de parolă e neterminată
+  const PREFIX_V1='LZE1:';                 // formatul vechi: fără id de cheie
+  const PREFIX='LZE2:';                    // formatul curent: LZE2:<id cheie>:<iv>.<cifrat>
   const ITERATII=310000;
-  let cheieCurenta=null;                   // CryptoKey ținută doar în memorie, în timpul sesiunii
+
+  // INELUL DE CHEI
+  // Fiecare conținut criptat își poartă în față id-ul cheii cu care a fost închis.
+  // Cât ține o schimbare de parolă, în inel stau AMBELE chei, așa că nimic nu
+  // devine necitibil dacă recriptarea se oprește la mijloc.
+  let cheieCurenta=null;                   // cheia cu care se scrie de acum
+  let idCurent=null;
+  let cheieMostenire=null;                 // pentru conținutul vechi, fără id (LZE1)
+  const inel=new Map();                    // id -> CryptoKey
 
   function buf2b64(buf){
     const octeti=new Uint8Array(buf);
@@ -627,60 +637,125 @@ const Cripto = (()=>{
 
   function areLacat(){ return !!localStorage.getItem(CHEIE_LS); }
   function esteDeblocat(){ return !!cheieCurenta; }
-  function blocheaza(){ cheieCurenta=null; }
+  function blocheaza(){ cheieCurenta=null; idCurent=null; cheieMostenire=null; inel.clear(); }
 
   async function derivaCheie(parola, sareBuf, iteratii){
     const enc=new TextEncoder();
     const materialCheie=await crypto.subtle.importKey('raw', enc.encode(parola), {name:'PBKDF2'}, false, ['deriveKey']);
     return crypto.subtle.deriveKey(
       {name:'PBKDF2', salt:sareBuf, iterations:iteratii, hash:'SHA-256'},
-      materialCheie, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']
+      materialCheie, {name:'AES-GCM', length:256},
+      true,   // extractabilă: doar așa putem păstra cheia veche învelită în cea nouă, cât ține migrarea
+      ['encrypt','decrypt']
     );
   }
+
+  // id-ul unei chei = primii 4 octeți din SHA-256 al sării. Deterministic, scurt, fără secrete în el.
+  async function idPentruSare(sareBuf){
+    const h=await crypto.subtle.digest('SHA-256', sareBuf);
+    return Array.from(new Uint8Array(h).slice(0,4)).map(o=>o.toString(16).padStart(2,'0')).join('');
+  }
+
+  // învelim o cheie în alta, ca s-o putem păstra în siguranță în localStorage
+  async function inveleste(cheieDeInvelit, cheieInvelitoare){
+    const brut=await crypto.subtle.exportKey('raw', cheieDeInvelit);
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const cifrat=await crypto.subtle.encrypt({name:'AES-GCM', iv}, cheieInvelitoare, brut);
+    return buf2b64(iv)+'.'+buf2b64(cifrat);
+  }
+  async function desfaCheia(pachet, cheieInvelitoare){
+    const [ivB64, ctB64]=pachet.split('.');
+    const brut=await crypto.subtle.decrypt({name:'AES-GCM', iv:b642buf(ivB64)}, cheieInvelitoare, b642buf(ctB64));
+    return crypto.subtle.importKey('raw', brut, {name:'AES-GCM'}, true, ['encrypt','decrypt']);
+  }
+
+  function citesteMigrare(){
+    try{ const r=localStorage.getItem(CHEIE_MIG); return r?JSON.parse(r):null; }catch(e){ return null; }
+  }
+  function migrareInCurs(){ return !!citesteMigrare(); }
 
   async function seteazaParolaNoua(parola){
     const sare=crypto.getRandomValues(new Uint8Array(16));
     const cheie=await derivaCheie(parola, sare, ITERATII);
     const iv=crypto.getRandomValues(new Uint8Array(12));
-    const enc=new TextEncoder();
-    const cifrat=await crypto.subtle.encrypt({name:'AES-GCM', iv}, cheie, enc.encode('LOGOS_OK'));
+    const cifrat=await crypto.subtle.encrypt({name:'AES-GCM', iv}, cheie, new TextEncoder().encode('LOGOS_OK'));
     const verificator=buf2b64(iv)+'.'+buf2b64(cifrat);
     localStorage.setItem(CHEIE_LS, JSON.stringify({sare:buf2b64(sare), verificator, iteratii:ITERATII}));
-    cheieCurenta=cheie;
+    const id=await idPentruSare(sare);
+    cheieCurenta=cheie; idCurent=id;
+    inel.set(id, cheie);
+    if(!cheieMostenire) cheieMostenire=cheie;
+    return {cheie, id};
   }
 
   async function incearcaParola(parola){
     const raw=localStorage.getItem(CHEIE_LS);
     if(!raw) return false;
     const {sare, verificator, iteratii} = JSON.parse(raw);
-    const cheie=await derivaCheie(parola, b642buf(sare), iteratii||ITERATII);
+    const sareBuf=b642buf(sare);
+    const cheie=await derivaCheie(parola, sareBuf, iteratii||ITERATII);
     try{
       const [ivB64, cifratB64]=verificator.split('.');
       const text=await crypto.subtle.decrypt({name:'AES-GCM', iv:b642buf(ivB64)}, cheie, b642buf(cifratB64));
       if(new TextDecoder().decode(text)!=='LOGOS_OK') return false;
-      cheieCurenta=cheie;
-      return true;
     }catch(e){ return false; }
+
+    const id=await idPentruSare(sareBuf);
+    inel.clear();
+    cheieCurenta=cheie; idCurent=id; inel.set(id, cheie);
+    cheieMostenire=cheie;
+
+    // dacă o schimbare de parolă a rămas neterminată, desfacem cheia veche și o punem în inel
+    const mig=citesteMigrare();
+    if(mig && mig.cheieVecheInvelita){
+      try{
+        const cheieVeche=await desfaCheia(mig.cheieVecheInvelita, cheie);
+        inel.set(mig.idVechi, cheieVeche);
+        cheieMostenire=cheieVeche;      // conținutul LZE1 rămas e închis cu cheia veche
+      }catch(e){ console.warn('Migrare: nu am putut desface cheia veche', e); }
+    }
+    return true;
   }
 
   async function encripteaza(text){
     if(!cheieCurenta || typeof text!=='string') return text;
     const iv=crypto.getRandomValues(new Uint8Array(12));
     const cifrat=await crypto.subtle.encrypt({name:'AES-GCM', iv}, cheieCurenta, new TextEncoder().encode(text));
-    return PREFIX+buf2b64(iv)+'.'+buf2b64(cifrat);
+    return PREFIX+idCurent+':'+buf2b64(iv)+'.'+buf2b64(cifrat);
   }
 
   async function decripteaza(text){
-    if(typeof text!=='string' || !text.startsWith(PREFIX)) return text; // conținut vechi, necriptat — îl lăsăm așa (migrare fără pierderi)
-    if(!cheieCurenta) return '⚠ blocat';
-    try{
-      const [ivB64, cifratB64]=text.slice(PREFIX.length).split('.');
-      const clar=await crypto.subtle.decrypt({name:'AES-GCM', iv:b642buf(ivB64)}, cheieCurenta, b642buf(cifratB64));
-      return new TextDecoder().decode(clar);
-    }catch(e){ return '⚠ eroare la decriptare'; }
+    if(typeof text!=='string') return text;
+
+    if(text.startsWith(PREFIX)){
+      if(!cheieCurenta) return '⚠ blocat';
+      const rest=text.slice(PREFIX.length);
+      const taietura=rest.indexOf(':');
+      if(taietura<0) return '⚠ eroare la decriptare';
+      const cheie=inel.get(rest.slice(0,taietura));
+      if(!cheie) return '⚠ cheie lipsă';
+      try{
+        const [ivB64, cifratB64]=rest.slice(taietura+1).split('.');
+        const clar=await crypto.subtle.decrypt({name:'AES-GCM', iv:b642buf(ivB64)}, cheie, b642buf(cifratB64));
+        return new TextDecoder().decode(clar);
+      }catch(e){ return '⚠ eroare la decriptare'; }
+    }
+
+    if(text.startsWith(PREFIX_V1)){        // format vechi, fără id — cheia de moștenire
+      if(!cheieMostenire) return '⚠ blocat';
+      try{
+        const [ivB64, cifratB64]=text.slice(PREFIX_V1.length).split('.');
+        const clar=await crypto.subtle.decrypt({name:'AES-GCM', iv:b642buf(ivB64)}, cheieMostenire, b642buf(cifratB64));
+        return new TextDecoder().decode(clar);
+      }catch(e){ return '⚠ eroare la decriptare'; }
+    }
+
+    return text;   // conținut vechi, necriptat — îl lăsăm așa (migrare fără pierderi)
   }
 
-  function esteCriptat(text){ return typeof text==='string' && text.startsWith(PREFIX); }
+  function esteCriptat(text){
+    return typeof text==='string' && (text.startsWith(PREFIX) || text.startsWith(PREFIX_V1));
+  }
 
   // verifică o parolă contra verificatorului salvat, FĂRĂ să schimbe sesiunea curentă
   async function verificaParolaBrut(parola){
@@ -695,28 +770,87 @@ const Cripto = (()=>{
     }catch(e){ return {ok:false}; }
   }
 
-  // schimbă parola master: verifică parola veche, decriptează tot cu ea,
-  // creează cheie nouă, recriptează și rescrie fiecare fișier
-  async function schimbaParola(parolaVeche, parolaNoua, alRaporteazaProgres){
+  // Trece fiecare fișier pe cheia curentă. Poate fi oprită și reluată oricând:
+  // ce e deja pe cheia nouă se recitește la fel de bine, deci a doua trecere e inofensivă.
+  async function reiaMigrare(raporteaza){
+    const mig=citesteMigrare();
+    if(!mig) return {succes:true, nimicDeFacut:true};
+    if(!cheieCurenta) return {succes:false, motiv:'Logos e blocat.'};
+
+    const brute=await Depozit.bruteTot();
+    let gata=0, sarite=0;
+    for(const rec of brute){
+      try{
+        if(typeof rec.continut==='string' && esteCriptat(rec.continut)){
+          const clar=await decripteaza(rec.continut);
+          // dacă nu putem citi, NU scriem: altfel am salva cifrul ca și cum ar fi text
+          if(typeof clar==='string' && clar.startsWith('⚠')){ sarite++; continue; }
+          rec.continut=clar;
+        }
+        await Depozit.scrie(rec);
+        gata++;
+      }catch(e){
+        sarite++;
+        console.warn('Migrare: sar peste', rec && rec.cale, e);
+      }
+      if(raporteaza) raporteaza(gata+'/'+brute.length);
+    }
+
+    if(sarite===0){
+      localStorage.removeItem(CHEIE_MIG);
+      inel.delete(mig.idVechi);
+      cheieMostenire=cheieCurenta;
+      return {succes:true, gata};
+    }
+    // cheia veche rămâne păstrată: nimic nu s-a pierdut, se poate încerca din nou
+    return {succes:false, gata, sarite,
+            motiv:sarite+' fișier(e) nu au putut fi recitite. Cheia veche e păstrată — încearcă din nou cu comanda „migrare" din Terminal.'};
+  }
+
+  // schimbă parola master.
+  // ORDINEA E TOT: punem deoparte cheia veche (învelită în cea nouă) ÎNAINTE de a
+  // schimba lacătul. Dacă se întrerupe oriunde după, la următoarea deschidere
+  // parola nouă desface cheia veche și migrarea continuă de unde a rămas.
+  async function schimbaParola(parolaVeche, parolaNoua, raporteaza){
     if(!parolaVeche || parolaNoua.length<6) return {succes:false, motiv:'Parola nouă trebuie să aibă minim 6 caractere.'};
     const verifVeche=await verificaParolaBrut(parolaVeche);
     if(!verifVeche.ok) return {succes:false, motiv:'Parola actuală este greșită.'};
+    if(migrareInCurs()) return {succes:false, motiv:'O schimbare de parolă e deja neterminată. Rulează „migrare" în Terminal întâi.'};
 
-    cheieCurenta=verifVeche.cheie; // cheia veche — necesară ca Depozit să poată decripta la citire
-    const toate=await Depozit.toateNefiltrate();  // citește tot, decriptat cu cheia veche
+    const rawVechi=JSON.parse(localStorage.getItem(CHEIE_LS));
+    const idVechi=await idPentruSare(b642buf(rawVechi.sare));
 
-    await seteazaParolaNoua(parolaNoua); // generează sare + cheie nouă, actualizează localStorage, cheieCurenta=nouă
+    // cheia veche, activă pentru citire
+    cheieCurenta=verifVeche.cheie; idCurent=idVechi;
+    inel.set(idVechi, verifVeche.cheie);
+    cheieMostenire=verifVeche.cheie;
 
-    let gata=0;
-    for(const f of toate){
-      await Depozit.scrie(f); // Depozit criptează automat cu cheieCurenta (deja cea nouă)
-      gata++;
-      if(alRaporteazaProgres) alRaporteazaProgres(gata+'/'+toate.length);
-    }
-    return {succes:true};
+    // cheia nouă — derivată, dar încă nescrisă nicăieri
+    const sareNoua=crypto.getRandomValues(new Uint8Array(16));
+    const cheieNoua=await derivaCheie(parolaNoua, sareNoua, ITERATII);
+    const idNou=await idPentruSare(sareNoua);
+
+    // ---- PLASA, ÎNAINTE DE SALT ----
+    const invelita=await inveleste(verifVeche.cheie, cheieNoua);
+    localStorage.setItem(CHEIE_MIG, JSON.stringify({
+      idVechi, idNou, cheieVecheInvelita:invelita, pornitLa:Date.now()
+    }));
+
+    // ---- abia acum schimbăm lacătul ----
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const cifrat=await crypto.subtle.encrypt({name:'AES-GCM', iv}, cheieNoua, new TextEncoder().encode('LOGOS_OK'));
+    localStorage.setItem(CHEIE_LS, JSON.stringify({
+      sare:buf2b64(sareNoua), verificator:buf2b64(iv)+'.'+buf2b64(cifrat), iteratii:ITERATII
+    }));
+    cheieCurenta=cheieNoua; idCurent=idNou; inel.set(idNou, cheieNoua);
+    // cheieMostenire rămâne cea veche: conținutul LZE1 nerescris încă e închis cu ea
+
+    return reiaMigrare(raporteaza);
   }
 
-  return {areLacat, esteDeblocat, blocheaza, seteazaParolaNoua, incearcaParola, encripteaza, decripteaza, schimbaParola, esteCriptat};
+  return {areLacat, esteDeblocat, blocheaza, seteazaParolaNoua, incearcaParola,
+          encripteaza, decripteaza, schimbaParola, esteCriptat,
+          reiaMigrare, migrareInCurs};
 })();
 
 /* ---------- ECRAN DE BLOCARE: cere parola master la pornire, la reluare, și la schimbarea parolei ---------- */
@@ -2296,7 +2430,8 @@ Nucleu.inregistreaza({
         const total=brute.length;
         const criptate=brute.filter(f=>Cripto.esteCriptat(f.continut)).length;
         const vechi=brute.filter(f=>typeof f.continut==='string' && f.continut && !Cripto.esteCriptat(f.continut)).length;
-        const stricate=decriptate.filter(f=>f.continut==='⚠ eroare la decriptare' || f.continut==='⚠ blocat');
+        const stricate=decriptate.filter(f=>typeof f.continut==='string' && (
+          f.continut==='⚠ eroare la decriptare' || f.continut==='⚠ blocat' || f.continut==='⚠ cheie lipsă'));
         const apps=decriptate.filter(f=>f.tip==='html').length;
         const fisiereReale=decriptate.filter(f=>f.tip!=='folder').length;
 
@@ -2761,6 +2896,7 @@ Nucleu.inregistreaza({
         randComanda('incarca','adu un backup de pe telefon înapoi');
         randComanda('import <fișier>','adu un backup salvat în depozit');
         randComanda('proprietari','ce aplicație ține ce fișier');
+        randComanda('migrare','starea recriptării după schimbarea parolei');
         randComanda('elibereaza <nume>','scoate fișierul din grija unei aplicații');
         randComanda('recupereaza <nume>','adu înapoi versiunea de dinainte');
         scrie('');
@@ -3045,6 +3181,25 @@ Nucleu.inregistreaza({
         if(pachet.memorie){ await Memorie.salveaza(pachet.memorie); }
         scrie('Am adus '+n+' fișier(e) din backup.','cald');
         scrie('(reîncarcă Logos ca să se vadă tot)','stins');
+      },
+
+      // ---- MIGRARE: starea recriptării, și reluarea ei ----
+      async migrare(){
+        if(!Cripto.migrareInCurs()){
+          scrie('Nicio recriptare în așteptare. Toate fișierele sunt pe cheia curentă.','cald');
+          return;
+        }
+        scrie('O schimbare de parolă a rămas neterminată.','info');
+        scrie('Cheia veche e păstrată, învelită în cea nouă — nimic nu s-a pierdut.','stins');
+        scrie('');
+        scrie('Continui acum...','stins');
+        const rez=await Cripto.reiaMigrare(p=>{ /* progresul curge în tăcere */ });
+        if(rez.succes){
+          scrie('Gata. '+(rez.gata||0)+' fișiere sunt acum pe cheia nouă.','cald');
+          scrie('Cheia veche a fost ștearsă.','stins');
+        }else{
+          scrie(rez.motiv,'err');
+        }
       },
 
       // ---- PROPRIETATE ȘI RECUPERARE ----
@@ -3844,6 +3999,27 @@ window.addEventListener('keydown',e=>{
   await porneste();
   actualizeazaMod();
 
+  // Dacă o schimbare de parolă a rămas neterminată (telefon adormit, filă închisă),
+  // o ducem la capăt în tăcere. Cheia veche a fost păstrată învelită în cea nouă,
+  // deci nimic nu s-a pierdut între timp.
+  if(Cripto.migrareInCurs()){
+    (async()=>{
+      const rez=await Cripto.reiaMigrare();
+      if(rez && rez.succes && !rez.nimicDeFacut){
+        console.log('Logos: recriptarea întreruptă a fost terminată ('+rez.gata+' fișiere).');
+      } else if(rez && !rez.succes){
+        console.warn('Logos: recriptarea nu s-a putut termina —', rez.motiv);
+      }
+    })();
+  }
+
+  // Cerem browserului să nu ne evacueze datele când are nevoie de spațiu.
+  // Fără asta, un depozit nefolosit câteva săptămâni poate fi șters din proprie inițiativă.
+  if(navigator.storage && navigator.storage.persist){
+    navigator.storage.persisted().then(deja=>{ if(!deja) return navigator.storage.persist(); })
+      .catch(()=>{});
+  }
+
   // blocare manuală, disponibilă oricând din meniul de start ("Blochează acum")
   let seBlocheaza=false;
   window.reblocheazaAcum=async function(){
@@ -3853,8 +4029,10 @@ window.addEventListener('keydown',e=>{
     seBlocheaza=false;
   };
 
-  // cheia de criptare trăiește doar în memorie — la închiderea reală a paginii dispare de la sine
-  window.addEventListener('pagehide',()=>{ Cripto.blocheaza(); });
+  // Parola se cere o singură dată, la deschidere. Cheia trăiește în memoria filei
+  // și dispare de la sine când fila e închisă cu adevărat — nu o ștergem la
+  // trecerea în fundal, fiindcă atunci revenirea ar arăta „⚠ blocat" fără lacăt.
+  // Blocarea rămâne la comandă: „Blochează acum" din meniul de start.
 })();
 
 // ---- PWA: paznicul offline (merge doar când Logos e servit prin https sau localhost) ----
