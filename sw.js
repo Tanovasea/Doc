@@ -8,7 +8,7 @@
    la activare șterge tot ce e din versiunile trecute.
    ============================================================ */
 
-const VERSIUNE = 'logos-2026-08-01-o';   // ← schimbă asta la fiecare încărcare
+const VERSIUNE = 'logos-2026-08-01-p';   // ← schimbă asta la fiecare încărcare
 
 const FISIERE = [
   './',

@@ -2754,8 +2754,11 @@ function deschideVizualizareSimpla(f, evidentiaza){
             ';cursor:pointer;padding:0 1px';
           a.addEventListener('click', async(ev)=>{
             ev.stopPropagation();
+            // orice salt închide panoul de aspect: dacă rămâne deschis, acoperă
+            // exact textul spre care tocmai ai sărit
+            panou.classList.remove('deschis');
             if(!fisier){                       // [[#frază]] — un loc din fișierul curent
-              if(loc){ evidentiaza=loc; randeazaCorp(); }
+              if(loc){ evidentiaza=loc; randeazaCorp(false); }
               return;
             }
             const tinta=await Legaturi.rezolva(nume);
@@ -2794,6 +2797,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
         r.textContent='↩ '+cale+(loc?('  › '+loc):'');
         r.style.cssText='color:'+prefViz.accent+';font-size:.86rem;padding:5px 0;cursor:pointer';
         r.addEventListener('click', async()=>{
+          panou.classList.remove('deschis');
           const alt=await Depozit.gaseste(cale);
           // aterizăm pe însăși trimiterea din fișierul-sursă: așa legătura
           // e cu adevărat în ambele sensuri, fără s-o scrii de două ori
@@ -2926,6 +2930,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
       panou.classList.toggle('deschis'); sinc();
     });
     root.querySelector('.viz-panou-x').addEventListener('click',()=>panou.classList.remove('deschis'));
+    // atingi textul → panoul se retrage, ca orice panou care ți-a acoperit ceva
+    corpV.addEventListener('pointerdown',()=>{
+      if(panou.classList.contains('deschis')) panou.classList.remove('deschis');
+    });
     root.querySelector('.viz-mare').addEventListener('click',()=>{ prefViz.font=Math.min(prefViz.font+1,30); aplica(); salv(); });
     root.querySelector('.viz-mic').addEventListener('click',()=>{ prefViz.font=Math.max(prefViz.font-1,12); aplica(); salv(); });
     aplica();
