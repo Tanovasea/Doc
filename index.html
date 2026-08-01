@@ -2644,6 +2644,37 @@ function inLegatura(text, poz){
   return inchis>=0 && inchis>=poz;
 }
 
+// Un fișier poate fi schimbat din altă fereastră (de pildă când desfacem
+// celălalt capăt al unei legături). Fereastra lui, dacă e deschisă, ține în
+// memorie versiunea veche: ar arăta legătura încă vie, iar la următoarea
+// salvare ar scrie-o la loc. O punem la curent pe loc.
+function improspateazaFereastra(cale){
+  const intrare=ferestreDeschise.find(x=>x.appId==='viz:'+cale);
+  if(intrare && intrare.laReafisare){
+    try{ intrare.laReafisare({}); }catch(e){ console.warn(e); }
+  }
+}
+
+// mesaj scurt, care se stinge singur — pentru confirmări care nu merită un dialog
+function instiintare(text){
+  let cutie=document.getElementById('instiintare');
+  if(!cutie){
+    cutie=document.createElement('div');
+    cutie.id='instiintare';
+    cutie.style.cssText='position:fixed;left:50%;transform:translateX(-50%);'+
+      'bottom:calc(env(safe-area-inset-bottom,0) + 26px);z-index:300;'+
+      'background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:20px;'+
+      'padding:10px 18px;font-size:.85rem;max-width:88%;text-align:center;'+
+      'box-shadow:0 4px 18px rgba(0,0,0,.45);opacity:0;transition:opacity .25s;'+
+      'pointer-events:none';
+    document.body.appendChild(cutie);
+  }
+  cutie.textContent=text;
+  cutie.style.opacity='1';
+  clearTimeout(cutie._crono);
+  cutie._crono=setTimeout(()=>{ cutie.style.opacity='0'; }, 2600);
+}
+
 function deschideVizualizareSimpla(f, evidentiaza){
   const eMd=/\.(md|markdown)$/i.test(f.cale);
   let laReafisare=null;
@@ -2931,33 +2962,46 @@ function deschideVizualizareSimpla(f, evidentiaza){
       await Depozit.scrie(f);
 
       // 2) în fișierul țintă: perechea care trimite înapoi spre noi
-      let siDincolo=false;
-      if(parti.fisier && parti.loc){
+      let siDincolo=false, numeDincolo='';
+      if(parti.fisier){
         try{
           const tinta=await Legaturi.rezolva(parti.fisier);
           if(tinta){
             const tt=tinta.continut||'';
             const re=new RegExp(Legaturi.TIPAR.source,'g');
+            const la=a=>Cautare.simplu(a||'');
             let mm, gasitLa=-1, gasitBrut='', gasitText='';
             while((mm=re.exec(tt))){
               const p=Legaturi.despicaTinta(mm[1].trim());
-              const spreNoi = p.fisier && Legaturi.cheie(p.fisier)===Legaturi.cheie(f.cale);
-              const acelasiCuvant = Cautare.simplu(p.eticheta||'')===Cautare.simplu(parti.loc||'');
-              if(spreNoi && acelasiCuvant){
+              if(!p.fisier || Legaturi.cheie(p.fisier)!==Legaturi.cheie(f.cale)) continue;
+              // perechea poate fi scrisă în oricare din cele două orientări:
+              // ori eticheta ei e locul spre care trimiteam noi, ori locul ei
+              // e cuvântul nostru. Acceptăm ambele, ca să nu rămână agățată.
+              const potrivit = (parti.loc && la(p.eticheta)===la(parti.loc)) ||
+                               (parti.eticheta && la(p.loc)===la(parti.eticheta)) ||
+                               (parti.loc && la(p.loc)===la(parti.eticheta||'') && la(p.eticheta)===la(parti.loc));
+              if(potrivit){
                 gasitLa=mm.index; gasitBrut=mm[0]; gasitText=p.eticheta||p.fisier; break;
               }
             }
             if(gasitLa>=0){
               tinta.continut=tt.slice(0,gasitLa)+gasitText+tt.slice(gasitLa+gasitBrut.length);
               await Depozit.scrie(tinta);
-              siDincolo=true;
+              improspateazaFereastra(tinta.cale);
+              siDincolo=true; numeDincolo=tinta.cale;
+            } else {
+              numeDincolo=tinta.cale;
             }
           }
         }catch(e){ console.warn('Nu am putut desface celălalt capăt', e); }
       }
 
       randeazaCorp(false);
-      console.log(siDincolo ? 'Legătură ștearsă din ambele fișiere.' : 'Legătură ștearsă.');
+      // spunem limpede ce s-a întâmplat: o ștergere pe jumătate, în tăcere,
+      // ar lăsa o legătură care duce spre un cuvânt ce nu mai trimite înapoi
+      if(siDincolo) instiintare('Legătură ștearsă din ambele fișiere.');
+      else if(numeDincolo) instiintare('Ștearsă aici. În „'+numeDincolo+'" nu am găsit perechea.');
+      else instiintare('Legătură ștearsă.');
     }
 
     // ---- FIRELE ÎNAPOI: cine trimite spre însemnarea asta ----
@@ -3359,6 +3403,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
             const inapoi='[['+loc+'|'+f.cale+'#'+sel.text+']]';
             tf.continut=tt.slice(0,undeE)+inapoi+tt.slice(undeE+loc.length);
             await Depozit.scrie(tf);
+            improspateazaFereastra(tf.cale);
           }
         }catch(e){ console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e); }
       }
