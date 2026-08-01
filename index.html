@@ -44,11 +44,19 @@
     overflow:hidden;overscroll-behavior:none;
     -webkit-user-select:none;user-select:none;  /* interfața nu se selectează */
   }
-  /* doar CONȚINUTUL real e selectabil: text din fișiere și terminal */
-  #iesire-term, .viz-corp, .corp-fereastra pre, .corp-fereastra .vd,
-  .corp-fereastra .doc, .ed-area, textarea, input{
+  /* doar CONȚINUTUL real e selectabil: terminal, editoare, câmpuri.
+     Textul din vizualizator NU e: acolo alegem noi cuvântul de sub deget, iar
+     dacă lăsam selecția browserului, bara lui („Copiază / Distribuie") se
+     suprapunea peste meniul nostru. Copierea o oferim în meniul propriu. */
+  #iesire-term, .corp-fereastra pre, .ed-area, textarea, input{
     -webkit-user-select:text;user-select:text;
   }
+  .viz-corp, .corp-fereastra .vd{
+    -webkit-user-select:none;user-select:none;
+    -webkit-touch-callout:none;
+  }
+  /* în scriere, textarea rămâne firească */
+  .viz-corp .viz-scriere{ -webkit-user-select:text;user-select:text }
 
   /* ===== BARA DE SUS ===== */
   #bara{
@@ -2646,7 +2654,6 @@ function deschideVizualizareSimpla(f, evidentiaza){
     root.innerHTML=`
       <div class="viz-bara">
         <span class="viz-nume"></span>
-        <span class="viz-leg" title="leagă selecția">⇄</span>
         <span class="viz-edit" title="editează">✎</span>
         <span class="viz-aspect" title="aspect">◐</span>
         <span class="viz-mic" title="micșorează">A−</span>
@@ -2796,6 +2803,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
         while((m=re.exec(brut))){
           ceva=true;
           if(m.index>de) bucata.appendChild(document.createTextNode(brut.slice(de,m.index)));
+          const brutInterior=m[1];              // exact cum e scris, pentru ștergere
           const nume=m[1].trim();
           const {eticheta, fisier, loc}=Legaturi.despicaTinta(nume);
           const a=document.createElement('span');
@@ -2827,6 +2835,27 @@ function deschideVizualizareSimpla(f, evidentiaza){
             await Depozit.scrie(nou);
             deschideCuApp(nou, loc||'');
           });
+
+          // apăsare lungă pe legătură → meniu, ca la Documente
+          let cronoLung=null, aFostLung=false;
+          const porneste=()=>{
+            aFostLung=false;
+            clearTimeout(cronoLung);
+            cronoLung=setTimeout(()=>{
+              aFostLung=true;
+              if(navigator.vibrate) { try{ navigator.vibrate(18); }catch(e){} }
+              meniulLegaturii(a, brutInterior, {eticheta, fisier, loc});
+            }, 520);
+          };
+          const opreste=()=>clearTimeout(cronoLung);
+          a.addEventListener('touchstart', porneste, {passive:true});
+          a.addEventListener('touchend', opreste);
+          a.addEventListener('touchmove', opreste);
+          a.addEventListener('touchcancel', opreste);
+          a.addEventListener('contextmenu', ev=>ev.preventDefault());
+          // dacă a fost apăsare lungă, nu mai sărim la țintă
+          a.addEventListener('click', ev=>{ if(aFostLung){ ev.stopImmediatePropagation(); ev.preventDefault(); } }, true);
+
           bucata.appendChild(a);
           de=m.index+m[0].length;
         }
@@ -2834,6 +2863,101 @@ function deschideVizualizareSimpla(f, evidentiaza){
         if(de<brut.length) bucata.appendChild(document.createTextNode(brut.slice(de)));
         nod.parentNode.replaceChild(bucata, nod);
       }
+    }
+
+    /* ---- MENIUL LEGĂTURII (apăsare lungă) ----
+       Ca la Documente: un meniu mic lângă cuvânt, cu deschidere și ștergere.
+       Ștergerea desface AMBELE capete — altfel ar rămâne o legătură care duce
+       spre un cuvânt ce nu mai trimite înapoi. */
+    function meniulLegaturii(elem, brutInterior, parti){
+      root.querySelectorAll('.leg-meniu').forEach(x=>x.remove());
+      const m=document.createElement('div');
+      m.className='leg-meniu';
+      m.style.cssText='position:absolute;z-index:45;background:#161b22;color:#c9d1d9;'+
+        'border:1px solid #30363d;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.5);'+
+        'padding:5px;min-width:190px;display:flex;flex-direction:column;gap:2px';
+
+      function buton(text, culoare, laApasare){
+        const b=document.createElement('button');
+        b.textContent=text;
+        b.style.cssText='background:none;border:none;text-align:left;padding:11px 13px;'+
+          'font:inherit;font-size:.88rem;border-radius:7px;color:'+culoare+';cursor:pointer';
+        b.addEventListener('click', ev=>{ ev.stopPropagation(); m.remove(); laApasare(); });
+        return b;
+      }
+
+      if(parti.fisier){
+        m.appendChild(buton('↦ Deschide ținta', prefViz.accent, async()=>{
+          const t=await Legaturi.rezolva(brutInterior.trim());
+          if(t) deschideCuApp(t, parti.loc||'');
+        }));
+      }
+      m.appendChild(buton('🗑 Șterge legătura', '#f85149', ()=>stergeLegatura(brutInterior, parti)));
+      m.appendChild(buton('renunță', '#8b949e', ()=>{}));
+
+      root.appendChild(m);
+      // așezăm meniul lângă cuvânt, dar în interiorul ferestrei
+      try{
+        const d=elem.getBoundingClientRect(), dr=root.getBoundingClientRect();
+        let sus=d.bottom-dr.top+6, stanga=d.left-dr.left;
+        if(sus+150>root.clientHeight) sus=Math.max(6, d.top-dr.top-150);
+        stanga=Math.max(8, Math.min(stanga, root.clientWidth-200));
+        m.style.top=sus+'px'; m.style.left=stanga+'px';
+      }catch(e){ m.style.top='60px'; m.style.left='20px'; }
+
+      // o atingere în afară îl închide
+      setTimeout(()=>{
+        const inafara=ev=>{
+          if(m.contains(ev.target)) return;
+          m.remove();
+          document.removeEventListener('pointerdown', inafara, true);
+        };
+        document.addEventListener('pointerdown', inafara, true);
+      }, 60);
+    }
+
+    // desface legătura din fișierul acesta ȘI perechea ei din fișierul țintă
+    async function stergeLegatura(brutInterior, parti){
+      const vizibil = parti.eticheta || (parti.loc ? (parti.fisier+' › '+parti.loc) : parti.fisier);
+      if(!confirm('Ștergi legătura „'+vizibil+'"?\n\nSe desface din ambele fișiere; textul rămâne.')) return;
+
+      // 1) aici: [[...]] → doar cuvintele, fără paranteze
+      const cautat='[['+brutInterior+']]';
+      let text=f.continut||'';
+      const poz=text.indexOf(cautat);
+      if(poz<0){ alert('Nu mai găsesc legătura în fișier.'); return; }
+      text=text.slice(0,poz)+(parti.eticheta||parti.fisier)+text.slice(poz+cautat.length);
+      f.continut=text;
+      await Depozit.scrie(f);
+
+      // 2) în fișierul țintă: perechea care trimite înapoi spre noi
+      let siDincolo=false;
+      if(parti.fisier && parti.loc){
+        try{
+          const tinta=await Legaturi.rezolva(parti.fisier);
+          if(tinta){
+            const tt=tinta.continut||'';
+            const re=new RegExp(Legaturi.TIPAR.source,'g');
+            let mm, gasitLa=-1, gasitBrut='', gasitText='';
+            while((mm=re.exec(tt))){
+              const p=Legaturi.despicaTinta(mm[1].trim());
+              const spreNoi = p.fisier && Legaturi.cheie(p.fisier)===Legaturi.cheie(f.cale);
+              const acelasiCuvant = Cautare.simplu(p.eticheta||'')===Cautare.simplu(parti.loc||'');
+              if(spreNoi && acelasiCuvant){
+                gasitLa=mm.index; gasitBrut=mm[0]; gasitText=p.eticheta||p.fisier; break;
+              }
+            }
+            if(gasitLa>=0){
+              tinta.continut=tt.slice(0,gasitLa)+gasitText+tt.slice(gasitLa+gasitBrut.length);
+              await Depozit.scrie(tinta);
+              siDincolo=true;
+            }
+          }
+        }catch(e){ console.warn('Nu am putut desface celălalt capăt', e); }
+      }
+
+      randeazaCorp(false);
+      console.log(siDincolo ? 'Legătură ștearsă din ambele fișiere.' : 'Legătură ștearsă.');
     }
 
     // ---- FIRELE ÎNAPOI: cine trimite spre însemnarea asta ----
@@ -2919,10 +3043,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       root.style.background=bg; root.style.color=txt;
       root.querySelector('.viz-bara').style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid '+ac+'33;background:'+bg+';flex-shrink:0';
       root.querySelector('.viz-nume').style.cssText='flex:1;font-size:.82rem;opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      root.querySelectorAll('.viz-aspect,.viz-mic,.viz-mare,.viz-leg').forEach(x=>{x.style.cssText='cursor:pointer;color:'+ac+';padding:6px 8px;font-size:1.1rem'});
-      // ⇄ pornește stins; se aprinde când ai ales un cuvânt
-      const bLeg=root.querySelector('.viz-leg');
-      if(bLeg) bLeg.style.opacity = (typeof selPastrata!=='undefined' && selPastrata) ? '1' : '.25';
+      root.querySelectorAll('.viz-aspect,.viz-mic,.viz-mare').forEach(x=>{x.style.cssText='cursor:pointer;color:'+ac+';padding:6px 8px;font-size:1.1rem'});
       btnEdit.style.cssText='cursor:pointer;color:'+ac+';padding:7px 12px;font-size:1rem;border:1px solid '+ac+'55;border-radius:8px;font-weight:600';
       corpV.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px 16px 40px;width:100%;font-size:'+prefViz.font+'px;line-height:'+prefViz.lh+';background:'+bg+';color:'+txt+';';
       // pe ecran lat, un rând prea lung obosește ochiul; îl putem strânge la mijloc.
@@ -3003,57 +3124,202 @@ function deschideVizualizareSimpla(f, evidentiaza){
     root.querySelector('.viz-mare').addEventListener('click',()=>{ prefViz.font=Math.min(prefViz.font+1,30); aplica(); salv(); });
     root.querySelector('.viz-mic').addEventListener('click',()=>{ prefViz.font=Math.max(prefViz.font-1,12); aplica(); salv(); });
 
-    /* ---- LEGĂTURI PRIN SELECȚIE ----
-       Alegi cuvintele cu apăsare lungă, apoi apeși ⇄ din bara de sus.
-       Butonul stă în bară, NU plutind lângă selecție: acolo se suprapunea peste
-       bara Android („Copiază / Distribuie"), care apare exact în același loc.
-       Logos scrie parantezele în locul tău; sintaxa rămâne în fișier, deci
-       textul se citește la fel de bine oriunde, nu doar înăuntrul Logos. */
-    const btnLeaga=root.querySelector('.viz-leg');
+    /* ---- ALEGEREA CUVÂNTULUI, FĂRĂ BARA ANDROID ----
+       Textul e `user-select:none` în citire, deci Android nu-și mai pornește
+       selecția proprie („Copiază / Distribuie") — care se bătea cu meniul nostru.
+       Aflăm singuri cuvântul de sub deget și îl marcăm noi.
+       Ține apăsat pe un cuvânt → meniu. Atingi alt cuvânt → se face frază. */
+    let alesText='', alesInainte=0, marcajAles=[];
 
-    function selectiaCurenta(){
-      if(mod==='editare'){
-        const ta=corpV.querySelector('.viz-scriere');
-        if(!ta) return null;
-        const a=ta.selectionStart, b=ta.selectionEnd;
-        if(b-a<1) return null;
-        return {text:ta.value.slice(a,b), start:a, sfarsit:b, dinEditor:true, ta};
+    function curataAles(){
+      for(const el of marcajAles){
+        const p=el.parentNode;
+        if(!p) continue;
+        p.replaceChild(document.createTextNode(el.textContent), el);
+        p.normalize();
       }
-      const sel=window.getSelection();
-      if(!sel || sel.isCollapsed || !sel.rangeCount) return null;
-      const r=sel.getRangeAt(0);
-      if(!corpV.contains(r.commonAncestorContainer)) return null;
-      const text=sel.toString().trim();
-      if(!text) return null;
-      // Numărăm ACUM a câta apariție e, cât timp selecția e vie. Dacă am amâna
-      // până la apăsarea butonului, textul poate fi între timp redesenat, iar
-      // reperul s-ar pierde — legătura ar cădea pe primul cuvânt potrivit.
-      let inainte=0;
+      marcajAles=[]; alesText=''; alesInainte=0;
+    }
+
+    // cuvântul (sau fraza) de sub un punct de pe ecran
+    function razaLaPunct(x,y){
+      let r=null;
+      if(document.caretRangeFromPoint) r=document.caretRangeFromPoint(x,y);
+      else if(document.caretPositionFromPoint){
+        const p=document.caretPositionFromPoint(x,y);
+        if(p){ r=document.createRange(); r.setStart(p.offsetNode,p.offset); r.collapse(true); }
+      }
+      if(!r) return null;
+      const nod=r.startContainer;
+      if(nod.nodeType!==3 || !corpV.contains(nod)) return null;
+      const t=nod.nodeValue;
+      let a=r.startOffset, b=r.startOffset;
+      const eLitera=c=>c && !/[\s.,;:!?()"„”…—–\[\]]/.test(c);
+      while(a>0 && eLitera(t[a-1])) a--;
+      while(b<t.length && eLitera(t[b])) b++;
+      if(b<=a) return null;
+      const raza=document.createRange();
+      raza.setStart(nod,a); raza.setEnd(nod,b);
+      return raza;
+    }
+
+    // a câta apariție e, în textul de pe ecran (reperul pentru scriere)
+    function catAparitiiInainte(raza, text){
+      let n=0;
       try{
-        const inaintea=r.cloneRange();
+        const inaintea=raza.cloneRange();
         inaintea.selectNodeContents(corpV);
-        inaintea.setEnd(r.startContainer, r.startOffset);
+        inaintea.setEnd(raza.startContainer, raza.startOffset);
         const dinainte=inaintea.toString();
         let i=0;
-        while((i=dinainte.indexOf(text,i))>=0){ inainte++; i+=text.length; }
+        while((i=dinainte.indexOf(text,i))>=0){ n++; i+=text.length; }
       }catch(e){}
-      return {text, inainte, dinEditor:false};
+      return n;
     }
 
-    // ⇄ se aprinde când ai ales ceva.
-    // Ținem minte ULTIMA selecție bună și n-o uităm când se golește: pe Android,
-    // atingerea butonului șterge selecția înainte s-o apucăm noi să o citim, iar
-    // dacă o uitam atunci, o apăsare scurtă nu funcționa — trebuia ținut apăsat.
-    let selPastrata=null;
-    function potrivesteButonul(){
-      const s=selectiaCurenta();
-      const bun = !!s && s.text.length>=2 && s.text.length<=150;
-      if(bun) selPastrata=s;
-      btnLeaga.style.opacity = selPastrata ? '1' : '.25';
+    // marchează vizual ce ai ales (nu folosim selecția browserului)
+    function arataAles(raza){
+      curataAles();
+      const text=raza.toString().trim();
+      if(!text) return false;
+      alesText=text;
+      alesInainte=catAparitiiInainte(raza, text);
+      try{
+        const sp=document.createElement('span');
+        sp.className='ales';
+        sp.style.cssText='background:'+prefViz.accent+'55;border-radius:3px;padding:0 1px';
+        raza.surroundContents(sp);
+        marcajAles=[sp];
+      }catch(e){
+        // fraza trece peste mai multe bucăți: marcăm fiecare bucată în parte
+        try{
+          const continut=raza.extractContents();
+          const sp=document.createElement('span');
+          sp.className='ales';
+          sp.style.cssText='background:'+prefViz.accent+'55;border-radius:3px;padding:0 1px';
+          sp.appendChild(continut);
+          raza.insertNode(sp);
+          marcajAles=[sp];
+        }catch(e2){ marcajAles=[]; }
+      }
+      return true;
     }
-    const laSelectie=()=>setTimeout(potrivesteButonul, 30);
-    document.addEventListener('selectionchange', laSelectie);
-    corpV.addEventListener('pointerup', laSelectie);
+
+    // ---- meniul pentru un cuvânt ales (creare de legătură) ----
+    function meniulCuvantului(x,y){
+      root.querySelectorAll('.leg-meniu').forEach(el=>el.remove());
+      const m=document.createElement('div');
+      m.className='leg-meniu';
+      m.style.cssText='position:absolute;z-index:45;background:#161b22;color:#c9d1d9;'+
+        'border:1px solid #30363d;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.5);'+
+        'padding:5px;min-width:210px;display:flex;flex-direction:column;gap:2px';
+      function buton(text, culoare, laApasare){
+        const b=document.createElement('button');
+        b.textContent=text;
+        b.style.cssText='background:none;border:none;text-align:left;padding:11px 13px;'+
+          'font:inherit;font-size:.88rem;border-radius:7px;color:'+culoare+';cursor:pointer';
+        b.addEventListener('click', ev=>{ ev.stopPropagation(); m.remove(); laApasare(); });
+        return b;
+      }
+      const scurt = alesText.length>28 ? alesText.slice(0,28)+'…' : alesText;
+      const cap=document.createElement('div');
+      cap.textContent='„'+scurt+'"';
+      cap.style.cssText='padding:8px 13px 6px;font-size:.8rem;color:#8b949e;border-bottom:1px solid #21262d;margin-bottom:3px';
+      m.appendChild(cap);
+      m.appendChild(buton('🔗 Leagă spre alt fișier', prefViz.accent, ()=>{
+        alegeTinta({text:alesText, inainte:alesInainte, dinEditor:false});
+      }));
+      m.appendChild(buton('📋 Copiază', '#c9d1d9', ()=>{
+        try{ navigator.clipboard.writeText(alesText); }catch(e){}
+        curataAles();
+      }));
+      m.appendChild(buton('renunță', '#8b949e', ()=>curataAles()));
+      root.appendChild(m);
+      asazaMeniu(m, x, y);
+      inchideLaAtingereInAfara(m, ()=>curataAles());
+      // atingerea altui cuvânt extinde alegerea la o frază
+      const extinde=ev=>{
+        if(m.contains(ev.target)) return;
+        const alta=razaLaPunct(ev.clientX, ev.clientY);
+        if(!alta) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const primul=marcajAles[0];
+        if(primul){
+          const total=document.createRange();
+          try{
+            total.setStartBefore(primul);
+            total.setEnd(alta.endContainer, alta.endOffset);
+            if(total.toString().trim().length>alesText.length && total.toString().length<300){
+              // scoatem marcajul vechi înainte să-l cuprindem pe cel nou
+              const p=primul.parentNode;
+              p.replaceChild(document.createTextNode(primul.textContent), primul);
+              p.normalize();
+              marcajAles=[];
+              const dinNou=document.createRange();
+              dinNou.setStart(total.startContainer, total.startOffset);
+              dinNou.setEnd(total.endContainer, total.endOffset);
+              arataAles(dinNou);
+              m.remove();
+              meniulCuvantului(ev.clientX, ev.clientY);
+              return;
+            }
+          }catch(e){}
+        }
+      };
+      corpV.addEventListener('pointerdown', extinde, true);
+      m.addEventListener('remove', ()=>corpV.removeEventListener('pointerdown', extinde, true));
+      setTimeout(()=>{
+        const obs=new MutationObserver(()=>{ if(!root.contains(m)){ corpV.removeEventListener('pointerdown', extinde, true); obs.disconnect(); } });
+        obs.observe(root, {childList:true});
+      },0);
+    }
+
+    function asazaMeniu(m, x, y){
+      try{
+        const dr=root.getBoundingClientRect();
+        let sus=y-dr.top+10, stanga=x-dr.left-20;
+        if(sus+190>root.clientHeight) sus=Math.max(6, y-dr.top-200);
+        stanga=Math.max(8, Math.min(stanga, root.clientWidth-220));
+        m.style.top=sus+'px'; m.style.left=stanga+'px';
+      }catch(e){ m.style.top='60px'; m.style.left='20px'; }
+    }
+    function inchideLaAtingereInAfara(m, laInchidere){
+      setTimeout(()=>{
+        const inafara=ev=>{
+          if(m.contains(ev.target)) return;
+          if(corpV.contains(ev.target)) return;   // atingerile din text au rolul lor
+          m.remove();
+          if(laInchidere) laInchidere();
+          document.removeEventListener('pointerdown', inafara, true);
+        };
+        document.addEventListener('pointerdown', inafara, true);
+      }, 80);
+    }
+
+    // ---- apăsare lungă pe text: alege cuvântul ----
+    let cronoText=null, punctApasare=null;
+    corpV.addEventListener('pointerdown', ev=>{
+      if(mod==='editare') return;
+      if(ev.target.closest && ev.target.closest('.leg')) return;   // legăturile au meniul lor
+      if(ev.target.closest && ev.target.closest('.leg-meniu')) return;
+      punctApasare={x:ev.clientX, y:ev.clientY};
+      clearTimeout(cronoText);
+      cronoText=setTimeout(()=>{
+        const raza=razaLaPunct(punctApasare.x, punctApasare.y);
+        if(!raza) return;
+        if(!arataAles(raza)) return;
+        if(navigator.vibrate){ try{ navigator.vibrate(18); }catch(e){} }
+        meniulCuvantului(punctApasare.x, punctApasare.y);
+      }, 520);
+    }, true);
+    const opresteCrono=()=>clearTimeout(cronoText);
+    corpV.addEventListener('pointerup', opresteCrono);
+    corpV.addEventListener('pointermove', ev=>{
+      if(!punctApasare) return;
+      if(Math.abs(ev.clientX-punctApasare.x)>10 || Math.abs(ev.clientY-punctApasare.y)>10) opresteCrono();
+    });
+    corpV.addEventListener('pointercancel', opresteCrono);
+    corpV.addEventListener('contextmenu', ev=>{ if(mod!=='editare') ev.preventDefault(); });
 
     // scrie legătura în text, exact peste bucata aleasă.
     // `tintaFis` e înregistrarea fișierului-țintă, ca să putem lega și înapoi.
@@ -3097,8 +3363,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
         }catch(e){ console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e); }
       }
 
-      selPastrata=null; btnLeaga.style.opacity='.25';
-      try{ window.getSelection().removeAllRanges(); }catch(e){}
+      curataAles();
       randeazaCorp(false);
     }
 
@@ -3195,17 +3460,6 @@ function deschideVizualizareSimpla(f, evidentiaza){
       setTimeout(()=>c.camp.focus(), 150);
     }
 
-    // `pointerdown` + preventDefault: o apăsare obișnuită ar șterge selecția
-    // înainte s-o apucăm noi să o citim.
-    btnLeaga.addEventListener('pointerdown', ev=>{
-      ev.preventDefault(); ev.stopPropagation();
-      const sel=selectiaCurenta()||selPastrata;
-      if(!sel){
-        alert('Alege întâi un cuvânt sau o frază (ține apăsat pe text), apoi apasă ⇄.');
-        return;
-      }
-      alegeTinta(sel);
-    });
 
     aplica();
     randeazaCorp(false);   // conținutul se construiește o singură dată, fără să sară tastatura
