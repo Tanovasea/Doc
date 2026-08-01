@@ -2,56 +2,27 @@
 <html lang="ro">
 <head>
 <script>
-/* Raport de erori: aplicația rulează într-un cadru, fără consolă la îndemână.
-   Orice eroare netratată apare într-o pastilă în colț, care se deschide la apăsare. */
+/* Raport de erori: aplicația rulează într-un cadru, în același origin ca Logos.
+   Trimitem problemele la Logos, care le arată discret în bara de titlu a ferestrei —
+   nu peste conținut, unde ar acoperi butoanele aplicației. */
 (function(){
-  var n=0, pastila=null, panou=null, buton=null;
-  function construieste(){
-    if(pastila) return;
-    var gazda=document.body||document.documentElement;
-    pastila=document.createElement('button');
-    pastila.style.cssText='position:fixed;right:10px;bottom:10px;z-index:99999;background:#7d1d1d;'+
-      'color:#ffd7d3;border:1px solid #f85149;border-radius:14px;font:11px/1 monospace;padding:6px 10px;opacity:.9';
-    panou=document.createElement('div');
-    panou.style.cssText='display:none;position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:45%;'+
-      'overflow:auto;background:#2b1113;color:#ffb3ae;font:12px/1.5 monospace;padding:8px 10px 30px;'+
-      'white-space:pre-wrap;border-top:1px solid #f85149;-webkit-user-select:text;user-select:text';
-    buton=document.createElement('button');
-    buton.textContent='\u2715 ascunde';
-    buton.style.cssText='position:absolute;right:8px;bottom:6px;background:transparent;border:none;color:#f85149;font:11px monospace';
-    panou.appendChild(buton);
-    pastila.onclick=function(){ panou.style.display='block'; pastila.style.display='none'; };
-    buton.onclick =function(){ panou.style.display='none'; pastila.style.display='block'; };
-    gazda.appendChild(pastila); gazda.appendChild(panou);
+  function raporteaza(text){
+    try{ parent.postMessage({logosDoc:'eroare', text:String(text).slice(0,600)}, '*'); }catch(e){}
   }
-  function arata(text){
-    if(!document.body){
-      document.addEventListener('DOMContentLoaded', function(){ arata(text); });
-      return;
-    }
-    n++; construieste();
-    pastila.textContent='\u26a0 '+n;
-    if(panou.style.display!=='block') pastila.style.display='block';
-    if(n>12) return;
-    var r=document.createElement('div'); r.textContent=text;
-    panou.insertBefore(r, buton);
-    panou.scrollTop=panou.scrollHeight;
-  }
-  window.__dcEroare=arata;
   window.addEventListener('error', function(ev){
     if(ev.target && ev.target!==window && ev.target.src){
       var u=String(ev.target.src||'');
       // un src gol se rezolva la adresa paginii insesi: zgomot, nu defect
       if(!u || u.split('#')[0]===location.href.split('#')[0]) return;
-      arata('nu s-a incarcat: '+u);
+      raporteaza('nu s-a incarcat: '+u);
       return;
     }
-    if(!ev.message && !ev.error) return;          // erori fara continut: le sarim
-    arata((ev.message||'eroare')+'  (linia '+(ev.lineno||'?')+')');
+    if(!ev.message && !ev.error) return;
+    raporteaza((ev.message||'eroare')+'  (linia '+(ev.lineno||'?')+')');
   }, true);
   window.addEventListener('unhandledrejection', function(ev){
     var m=ev.reason;
-    arata('promisiune respinsa: '+((m && (m.message||m))||'necunoscut'));
+    raporteaza('promisiune respinsa: '+((m && (m.message||m))||'necunoscut'));
   });
 })();
 </script>

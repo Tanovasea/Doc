@@ -2005,6 +2005,55 @@ const Cautare = (()=>{
           simpluCuHarta, inapoi, potriviriIn, tiparPentru, fragmentDin};
 })();
 
+/* ---------- INDICATOR DE ERORI ----------
+   Când o aplicație se plânge, semnul apare în bara de titlu a ferestrei —
+   nu peste conținut, unde ar acoperi butoanele aplicației. Se deschide doar
+   la apăsare, iar dacă nu e nimic de spus nu se vede deloc. */
+function indicatorEroare(corp, titlu){
+  let nr=0, semn=null, panou=null, inchide=null;
+
+  function construieste(){
+    if(semn) return;
+    const fereastra=corp.closest ? corp.closest('.fereastra') : null;
+    const cap=fereastra ? fereastra.querySelector('.cap-fereastra') : null;
+
+    semn=document.createElement('span');
+    semn.textContent='⚠';
+    semn.title='diagnostic';
+    semn.style.cssText='cursor:pointer;color:#f85149;font-size:.85rem;padding:4px 6px;'+
+      'opacity:.75;flex-shrink:0';
+    if(cap) cap.insertBefore(semn, cap.querySelector('.x'));
+    else { semn.style.cssText+=';position:absolute;right:34px;top:6px;z-index:5'; corp.appendChild(semn); }
+
+    panou=document.createElement('div');
+    panou.style.cssText='display:none;position:absolute;left:0;right:0;bottom:0;z-index:60;'+
+      'max-height:45%;overflow:auto;background:#2b1113;border-top:1px solid #f85149;'+
+      'color:#ffb3ae;font:12px/1.5 var(--mono);padding:8px 10px 32px;white-space:pre-wrap;'+
+      '-webkit-user-select:text;user-select:text';
+    inchide=document.createElement('button');
+    inchide.textContent='✕ ascunde';
+    inchide.style.cssText='position:absolute;right:8px;bottom:6px;background:transparent;'+
+      'border:none;color:#f85149;font:11px var(--mono);cursor:pointer';
+    panou.appendChild(inchide);
+    corp.appendChild(panou);
+
+    semn.addEventListener('click',()=>{ panou.style.display='block'; });
+    inchide.addEventListener('click',()=>{ panou.style.display='none'; });
+  }
+
+  function arata(text){
+    construieste();
+    nr++;
+    semn.title=nr+' problemă/probleme în „'+(titlu||'aplicație')+'"';
+    if(nr>12) return;                     // nu ne inundăm dacă intră în buclă
+    const r=document.createElement('div');
+    r.textContent=text;
+    panou.insertBefore(r, inchide);
+    panou.scrollTop=panou.scrollHeight;
+  }
+  return {arata};
+}
+
 /* ---------- FEREASTRĂ CĂTRE APLICAȚIILE INTERNE ----------
    Modulele de mai sus sunt declarate cu `const`, iar `const` la nivel de script
    NU devine proprietate a lui window. O aplicație internă (iframe, același
@@ -2057,39 +2106,12 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
     ifr.style.cssText='flex:1;width:100%;border:none;background:#fff';
     wrap.appendChild(ifr);
 
-    // ---- RAPORTUL DE ERORI: strâns într-o pastilă, deschis doar la cerere.
-    // Plutește peste colț (position:absolute), deci nu ia nimic din așezare.
-    const pastila=document.createElement('button');
-    pastila.style.cssText='display:none;position:absolute;right:10px;bottom:10px;z-index:5;'+
-      'background:#7d1d1d;color:#ffd7d3;border:1px solid #f85149;border-radius:14px;'+
-      'font:11px/1 var(--mono);padding:6px 10px;opacity:.85;cursor:pointer';
-    const panou=document.createElement('div');
-    panou.style.cssText='display:none;position:absolute;left:0;right:0;bottom:0;z-index:6;'+
-      'max-height:45%;overflow:auto;background:#2b1113;border-top:1px solid #f85149;'+
-      'color:#ffb3ae;font:12px/1.5 var(--mono);padding:8px 10px 30px;white-space:pre-wrap;'+
-      '-webkit-user-select:text;user-select:text';
-    const inchide=document.createElement('button');
-    inchide.textContent='✕ ascunde';
-    inchide.style.cssText='position:absolute;right:8px;bottom:6px;background:transparent;'+
-      'border:none;color:#f85149;font:11px var(--mono);cursor:pointer';
-    panou.appendChild(inchide);
-
-    let nrEr=0;
-    pastila.addEventListener('click',()=>{ panou.style.display='block'; pastila.style.display='none'; });
-    inchide.addEventListener('click',()=>{ panou.style.display='none'; pastila.style.display='block'; });
-
-    function aratoEroare(text){
-      nrEr++;
-      pastila.textContent='⚠ '+nrEr;
-      if(panou.style.display!=='block') pastila.style.display='block';
-      if(nrEr>12) return;                       // nu ne inundăm cu aceeași eroare în buclă
-      const r=document.createElement('div');
-      r.textContent=text;
-      panou.insertBefore(r, inchide);
-      panou.scrollTop=panou.scrollHeight;
-    }
-    wrap.appendChild(pastila);
-    wrap.appendChild(panou);
+    // ---- RAPORTUL DE ERORI ----
+    // Semnul stă în bara de titlu a ferestrei, nu peste conținut: altfel s-ar
+    // suprapune peste butoanele aplicației, exact unde e mai enervant.
+    // Apare doar dacă e ceva de spus, și se deschide numai la apăsare.
+    const raport=indicatorEroare(corp, '▷ '+numeApp);
+    const aratoEroare=raport.arata;
     corp.appendChild(wrap);
 
     // Folosim `srcdoc`, nu `blob:`. Un blob: aparține originii Logos, așa că
@@ -2822,8 +2844,21 @@ Nucleu.inregistreaza({
     ifr.src='doc-offline.html';
     ifr.style.cssText='width:100%;height:100%;border:none;background:#fff';
     corp.appendChild(ifr);
+
+    // aplicația internă ne trimite problemele ei; le arătăm în bara de titlu
+    const raport=indicatorEroare(corp, 'Documente');
+    function laEroareDoc(ev){
+      if(ev.source!==ifr.contentWindow) return;
+      const d=ev.data;
+      if(d && d.logosDoc==='eroare' && typeof d.text==='string') raport.arata(d.text);
+    }
+    window.addEventListener('message', laEroareDoc);
+
     // la închidere golim cadrul: pdf.js ține multă memorie
-    return ()=>{ try{ ifr.src='about:blank'; }catch(e){} };
+    return ()=>{
+      window.removeEventListener('message', laEroareDoc);
+      try{ ifr.src='about:blank'; }catch(e){}
+    };
   }
 });
 
