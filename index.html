@@ -1014,7 +1014,7 @@ const Depozit = (()=>{
           // ținem indexul la zi aici, în inima scrierii: dacă l-am actualiza
           // din fiecare loc care salvează, sigur am uita unul, iar căutarea
           // ar rămâne în urmă fără niciun semn.
-          r.onsuccess=()=>{ try{ Cautare.actualizeaza(f); }catch(e){} rez(f); };
+          r.onsuccess=()=>{ try{ Cautare.actualizeaza(f); Legaturi.actualizeaza(f); }catch(e){} rez(f); };
           r.onerror=()=>resp(r.error);
         }catch(e){ resp(e); }
       })();
@@ -1033,7 +1033,7 @@ const Depozit = (()=>{
       r.onerror=()=>rez(null);
     });
   }
-  function sterge(cale){return new Promise((rez)=>{const r=tx('readwrite').delete(cale);r.onsuccess=()=>{ try{ Cautare.uita(cale); }catch(e){} rez(true);};r.onerror=()=>rez(false);});}
+  function sterge(cale){return new Promise((rez)=>{const r=tx('readwrite').delete(cale);r.onsuccess=()=>{ try{ Cautare.uita(cale); Legaturi.uita(cale); }catch(e){} rez(true);};r.onerror=()=>rez(false);});}
   function toate(){
     return new Promise((rez)=>{
       const r=tx('readonly').getAll();
@@ -2005,6 +2005,97 @@ const Cautare = (()=>{
           simpluCuHarta, inapoi, potriviriIn, tiparPentru, fragmentDin};
 })();
 
+/* ---------- LEGĂTURI: [[nume]] ----------
+   Scrii [[Bunici]] într-o însemnare și devine o trimitere pe care o atingi.
+   Ținem ambele direcții: încotro trimite un fișier, și cine trimite spre el.
+   Firele înapoi sunt partea valoroasă — arată legături pe care nu le-ai plănuit.
+   Ca și indexul de căutare, harta stă în memorie și se actualizează la scriere. */
+const Legaturi = (()=>{
+  const TIPAR=/\[\[([^\[\]\n]{1,120})\]\]/g;
+  let catre=new Map();          // cale -> Set de nume țintă (așa cum sunt scrise)
+  let dinspre=new Map();        // nume normalizat -> Set de căi care trimit acolo
+  let gata=false;
+
+  // „Bunici", „bunici.md", „Jurnal/Bunici" — toate duc la același loc
+  function cheie(nume){
+    let n=String(nume||'').trim();
+    n=n.replace(/\.(md|markdown|txt)$/i,'');      // extensia nu contează
+    n=n.split('/').pop();                          // nici folderul
+    return Cautare.simplu(n);
+  }
+  function extrage(text){
+    if(typeof text!=='string') return [];
+    const rez=[]; let m;
+    TIPAR.lastIndex=0;
+    while((m=TIPAR.exec(text))){
+      const nume=m[1].trim();
+      if(nume) rez.push(nume);
+    }
+    return rez;
+  }
+
+  function scoate(cale){
+    const vechi=catre.get(cale);
+    if(vechi){
+      for(const t of vechi){
+        const set=dinspre.get(cheie(t));
+        if(set){ set.delete(cale); if(!set.size) dinspre.delete(cheie(t)); }
+      }
+    }
+    catre.delete(cale);
+  }
+  function adauga(f){
+    if(!f || f.tip==='folder' || typeof f.continut!=='string') return;
+    if(f.ascuns || /^__/.test(f.cale)) return;
+    const tinte=extrage(f.continut);
+    if(!tinte.length) return;
+    catre.set(f.cale, new Set(tinte));
+    for(const t of tinte){
+      const k=cheie(t);
+      if(!dinspre.has(k)) dinspre.set(k, new Set());
+      dinspre.get(k).add(f.cale);
+    }
+  }
+  function actualizeaza(f){ if(gata){ scoate(f.cale); adauga(f); } }
+  function uita(cale){ if(gata) scoate(cale); }
+
+  async function construieste(){
+    catre=new Map(); dinspre=new Map();
+    for(const f of await Depozit.toate()) adauga(f);
+    gata=true;
+  }
+  function esteGata(){ return gata; }
+
+  // găsește fișierul spre care trimite [[nume]]; null dacă încă nu există
+  async function rezolva(nume){
+    const k=cheie(nume);
+    const toate=await Depozit.toate();
+    return toate.find(f=>f.tip!=='folder' && cheie(f.cale)===k) || null;
+  }
+  function iesiri(cale){ return Array.from(catre.get(cale)||[]); }
+  function intrari(cale){
+    // cine trimite spre fișierul ăsta (după numele lui, oricum ar fi scris)
+    return Array.from(dinspre.get(cheie(cale))||[]).filter(x=>x!==cale);
+  }
+  // trimiteri către fișiere care nu există încă — începuturi de însemnări
+  function nerezolvate(toateCaile){
+    const existente=new Set(toateCaile.map(cheie));
+    const lipsa=new Map();
+    for(const [cale,tinte] of catre){
+      for(const t of tinte){
+        if(!existente.has(cheie(t))){
+          if(!lipsa.has(t)) lipsa.set(t, new Set());
+          lipsa.get(t).add(cale);
+        }
+      }
+    }
+    return lipsa;
+  }
+
+  return {extrage, actualizeaza, uita, construieste, esteGata, rezolva,
+          iesiri, intrari, nerezolvate, cheie, TIPAR};
+})();
+
 /* ---------- INDICATOR DE ERORI ----------
    Când o aplicație se plânge, semnul apare în bara de titlu a ferestrei —
    nu peste conținut, unde ar acoperi butoanele aplicației. Se deschide doar
@@ -2526,7 +2617,79 @@ function deschideVizualizareSimpla(f, evidentiaza){
       } else {
         corpV.innerHTML='<pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+(f.continut||'(gol)').replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</pre>';
       }
-      if(mod!=='editare' && evidentiaza) marcheazaGasitele();
+      if(mod!=='editare'){
+        faLegaturile();
+        araFireleInapoi();
+        if(evidentiaza) marcheazaGasitele();
+      }
+    }
+
+    // ---- LEGĂTURI: [[nume]] devine atingibil ----
+    function faLegaturile(){
+      const plimbare=document.createTreeWalker(corpV, NodeFilter.SHOW_TEXT);
+      const noduri=[]; let n;
+      while((n=plimbare.nextNode())) noduri.push(n);
+
+      for(const nod of noduri){
+        if(nod.parentNode && nod.parentNode.classList &&
+           nod.parentNode.classList.contains('leg')) continue;
+        const brut=nod.nodeValue;
+        if(brut.indexOf('[[')<0) continue;
+        const re=new RegExp(Legaturi.TIPAR.source,'g');
+        const bucata=document.createDocumentFragment();
+        let de=0, m, ceva=false;
+        while((m=re.exec(brut))){
+          ceva=true;
+          if(m.index>de) bucata.appendChild(document.createTextNode(brut.slice(de,m.index)));
+          const nume=m[1].trim();
+          const a=document.createElement('span');
+          a.className='leg';
+          a.textContent=nume;
+          a.style.cssText='color:'+prefViz.accent+';border-bottom:1px dotted '+prefViz.accent+
+            ';cursor:pointer;padding:0 1px';
+          a.addEventListener('click', async(ev)=>{
+            ev.stopPropagation();
+            const tinta=await Legaturi.rezolva(nume);
+            if(tinta){ deschideCuApp(tinta); return; }
+            // trimiterea nu are încă un fișier — o poți porni chiar acum
+            if(!confirm('„'+nume+'" nu există încă.\n\nÎl creez?')) return;
+            const cale=/\.[a-z0-9]{1,6}$/i.test(nume) ? nume : (nume+'.md');
+            const nou={cale, tip:cale.split('.').pop(), creat:Date.now(),
+                       continut:'# '+nume+'\n\n'};
+            await Depozit.scrie(nou);
+            deschideCuApp(nou);
+          });
+          bucata.appendChild(a);
+          de=m.index+m[0].length;
+        }
+        if(!ceva) continue;
+        if(de<brut.length) bucata.appendChild(document.createTextNode(brut.slice(de)));
+        nod.parentNode.replaceChild(bucata, nod);
+      }
+    }
+
+    // ---- FIRELE ÎNAPOI: cine trimite spre însemnarea asta ----
+    async function araFireleInapoi(){
+      if(!Legaturi.esteGata()) await Legaturi.construieste();
+      const dinspre=Legaturi.intrari(f.cale);
+      if(!dinspre.length) return;
+      const sectiune=document.createElement('div');
+      sectiune.style.cssText='margin-top:34px;padding-top:14px;border-top:1px solid '+prefViz.accent+'33';
+      const cap=document.createElement('div');
+      cap.textContent='Trimit aici ('+dinspre.length+')';
+      cap.style.cssText='font-size:.78rem;opacity:.55;margin-bottom:8px;letter-spacing:.04em';
+      sectiune.appendChild(cap);
+      for(const cale of dinspre){
+        const r=document.createElement('div');
+        r.textContent='↩ '+cale;
+        r.style.cssText='color:'+prefViz.accent+';font-size:.86rem;padding:5px 0;cursor:pointer';
+        r.addEventListener('click', async()=>{
+          const alt=await Depozit.gaseste(cale);
+          if(alt) deschideCuApp(alt);
+        });
+        sectiune.appendChild(r);
+      }
+      corpV.appendChild(sectiune);
     }
 
     // ---- EVIDENȚIERE: colorăm ce s-a căutat și sărim la prima apariție ----
@@ -3404,6 +3567,7 @@ Nucleu.inregistreaza({
         randComanda('import <fișier>','adu un backup salvat în depozit');
         randComanda('proprietari','ce aplicație ține ce fișier');
         randComanda('index','reconstruiește indexul de căutare');
+        randComanda('legaturi [nume]','ce trimite unde, sau trimiterile fără fișier');
         randComanda('migrare','starea recriptării după schimbarea parolei');
         randComanda('elibereaza <nume>','scoate fișierul din grija unei aplicații');
         randComanda('recupereaza <nume>','adu înapoi versiunea de dinainte');
@@ -3693,6 +3857,41 @@ Nucleu.inregistreaza({
         if(pachet.memorie){ await Memorie.salveaza(pachet.memorie); }
         scrie('Am adus '+n+' fișier(e) din backup.','cald');
         scrie('(reîncarcă Logos ca să se vadă tot)','stins');
+      },
+
+      // ---- LEGĂTURI ----
+      async legaturi(arg){
+        if(!Legaturi.esteGata()) await Legaturi.construieste();
+        const nume=(arg||'').trim();
+        if(nume){
+          const f=await Depozit.gaseste(nume) || await Legaturi.rezolva(nume);
+          if(!f){ scrie('Nu găsesc: '+nume,'err'); return; }
+          const iesiri=Legaturi.iesiri(f.cale), intrari=Legaturi.intrari(f.cale);
+          scrie(f.cale,'info');
+          if(iesiri.length){
+            scrie('');
+            scrie('Trimite spre:','stins');
+            for(const t of iesiri){
+              const tinta=await Legaturi.rezolva(t);
+              if(tinta) scrieFisier(tinta, '');
+              else scrie('  [[' + t + ']]  (încă nu există)','stins');
+            }
+          }
+          if(intrari.length){
+            scrie('');
+            scrie('Trimit aici:','stins');
+            for(const c of intrari) scrieFisier({cale:c}, '');
+          }
+          if(!iesiri.length && !intrari.length) scrie('Nicio legătură.','stins');
+          return;
+        }
+        // fără argument: harta trimiterilor care încă n-au fișier
+        const toate=(await Depozit.toate()).filter(x=>x.tip!=='folder').map(x=>x.cale);
+        const lipsa=Legaturi.nerezolvate(toate);
+        if(!lipsa.size){ scrie('Toate trimiterile au fișier.','cald'); return; }
+        scrie('Trimiteri fără fișier (începuturi de însemnări):','info');
+        scrie('');
+        for(const [nume, surse] of lipsa) randInvatat('[['+nume+']]', Array.from(surse).join(', '));
       },
 
       // ---- MIGRARE: starea recriptării, și reluarea ei ----
@@ -4524,6 +4723,10 @@ window.addEventListener('keydown',e=>{
       }
     })();
   }
+
+  // Harta legăturilor, construită din vreme și în tăcere: altfel primul fișier
+  // deschis n-ar avea firele înapoi, iar tu ai crede că nu trimite nimeni spre el.
+  setTimeout(()=>{ Legaturi.construieste().catch(()=>{}); }, 400);
 
   // Cerem browserului să nu ne evacueze datele când are nevoie de spațiu.
   // Fără asta, un depozit nefolosit câteva săptămâni poate fi șters din proprie inițiativă.
