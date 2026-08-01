@@ -2953,9 +2953,12 @@ function deschideVizualizareSimpla(f, evidentiaza){
       // o atingere în afară îl închide
       setTimeout(()=>{
         const inafara=ev=>{
-          if(m.contains(ev.target)) return;
-          m.remove();
-          document.removeEventListener('pointerdown', inafara, true);
+          // meniul ăsta nu mai e în pagină: ascultătorul pleacă, fără să se
+          // amestece în meniul care i-a luat locul
+          if(!document.contains(m) || !m.contains(ev.target)){
+            m.remove();
+            document.removeEventListener('pointerdown', inafara, true);
+          }
         };
         document.addEventListener('pointerdown', inafara, true);
       }, 60);
@@ -3325,14 +3328,18 @@ function deschideVizualizareSimpla(f, evidentiaza){
       cap.textContent='„'+scurt+'"';
       cap.style.cssText='padding:8px 13px 6px;font-size:.8rem;color:#8b949e;border-bottom:1px solid #21262d;margin-bottom:3px';
       m.appendChild(cap);
+      // Ce ai ales, prins în clipa asta. Butoanele nu mai citesc `alesText`
+      // când sunt apăsate: între deschiderea meniului și atingerea butonului
+      // se poate strecura o curățare, iar atunci se scria o legătură goală.
+      const alegerea={text:alesText, inainte:alesInainte, dinEditor:false};
       m.appendChild(buton('🔗 Leagă spre alt fișier', prefViz.accent, ()=>{
-        alegeTinta({text:alesText, inainte:alesInainte, dinEditor:false});
+        alegeTinta(alegerea);
       }));
       m.appendChild(buton('↳ Leagă în fișierul acesta', prefViz.accent, ()=>{
-        alegeLoculAici({text:alesText, inainte:alesInainte, dinEditor:false});
+        alegeLoculAici(alegerea);
       }));
       m.appendChild(buton('📋 Copiază', '#c9d1d9', ()=>{
-        try{ navigator.clipboard.writeText(alesText); }catch(e){}
+        try{ navigator.clipboard.writeText(alegerea.text); }catch(e){}
         curataAles();
       }));
       m.appendChild(buton('renunță', '#8b949e', ()=>curataAles()));
@@ -3341,6 +3348,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       inchideLaAtingereInAfara(m, ()=>curataAles());
       // atingerea altui cuvânt extinde alegerea la o frază
       const extinde=ev=>{
+        if(!document.contains(m)){ corpV.removeEventListener('pointerdown', extinde, true); return; }
         if(m.contains(ev.target)) return;
         const alta=razaLaPunct(ev.clientX, ev.clientY);
         if(!alta) return;
@@ -3386,9 +3394,23 @@ function deschideVizualizareSimpla(f, evidentiaza){
         m.style.top=sus+'px'; m.style.left=stanga+'px';
       }catch(e){ m.style.top='60px'; m.style.left='20px'; }
     }
+    /* Închiderea la atingere în afară.
+       Ascultătorul stă pe `document`, în capturare, și se scotea singur DOAR
+       când chiar apuca să se declanșeze. Un meniu închis altfel (prin buton,
+       sau măturat de meniul următor) își lăsa ascultătorul agățat de pagină.
+       La meniul următor, apăsarea pe un buton trecea întâi prin ascultătorul
+       vechi: meniul lui nu mai era în pagină, butonul nu era nici în corpul
+       textului, deci socotea că ai atins „în afară" și curăța alegerea — cu o
+       clipă înainte ca butonul să apuce să citească `alesText`. De aici
+       legătura scrisă cu eticheta goală, la începutul fișierului.
+       Acum, un ascultător al cărui meniu nu mai e în pagină pleacă în tăcere. */
     function inchideLaAtingereInAfara(m, laInchidere){
       setTimeout(()=>{
         const inafara=ev=>{
+          if(!document.contains(m)){                // meniul lui s-a dus demult
+            document.removeEventListener('pointerdown', inafara, true);
+            return;
+          }
           if(m.contains(ev.target)) return;
           if(corpV.contains(ev.target)) return;   // atingerile din text au rolul lor
           m.remove();
@@ -3442,6 +3464,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
     // prima apariție liberă a unui text (una care nu e deja înăuntrul unei
     // legături), sărind peste primele `inainte` apariții libere
     function aparitieLibera(text, cautat, inainte){
+      if(!cautat) return -1;          // fără text, `indexOf` întoarce 0 și scria la începutul fișierului
       let de=0, sarite=0, p;
       while((p=text.indexOf(cautat, de))>=0){
         de=p+cautat.length;
@@ -3453,6 +3476,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
     }
 
     async function scrieLegatura(sel, tinta, loc, tintaFis, pozAleasa){
+      if(!sel || !sel.text){ instiintare('S-a pierdut cuvântul ales. Ține apăsat din nou pe el.'); return; }
       const inlocuire='[['+sel.text+'|'+tinta+(loc?('#'+loc):'')+']]';
       let text=f.continut||'';
       if(sel.dinEditor){
@@ -3581,6 +3605,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
     // ar fi o legătură a fișierului cu el însuși, iar cele două capete s-ar
     // căuta unul pe altul la fiecare ștergere.
     async function scrieLegaturaInterna(sel, loc){
+      if(!sel || !sel.text){ instiintare('S-a pierdut cuvântul ales. Ține apăsat din nou pe el.'); return; }
       let text=f.continut||'';
       let poz=aparitieLibera(text, sel.text, sel.inainte||0);
       if(poz<0) poz=aparitieLibera(text, sel.text, 0);
