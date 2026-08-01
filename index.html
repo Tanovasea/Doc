@@ -1251,6 +1251,13 @@ function deschideFereastra(nume, montare, ctx, meta={}){
   butonX.addEventListener('click',ev=>{ ev.stopPropagation(); ev.preventDefault(); });
   el.addEventListener('pointerdown',()=>{ if(document.body.classList.contains('birou')){ activaId=id; randeazaComutator(); } });
   const corp=el.querySelector('.corp-fereastra');
+  // Plasă: cadrul ferestrei nu se derulează niciodată. Un `focus()` pe un câmp
+  // sau o derulare programatică poate mișca și containerele cu `overflow:hidden`,
+  // iar atunci bara ferestrei iese din ecran și rămâne gol dedesubt.
+  corp.addEventListener('scroll', ()=>{
+    if(corp.scrollTop) corp.scrollTop=0;
+    if(corp.scrollLeft) corp.scrollLeft=0;
+  }, {passive:true});
 
   const curatenie = montare(corp, ctx||{}) || null;
   const intrare={id, appId, nume, iconita:meta.iconita, ctx, el, corp, curatenie,
@@ -2892,7 +2899,14 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
       if(primul){
         setTimeout(()=>{
-          primul.scrollIntoView({block:'center', behavior:'smooth'});
+          // Derulăm NUMAI cadrul textului. `scrollIntoView` derulează toți
+          // părinții — inclusiv pe cei cu `overflow:hidden`, care se pot derula
+          // programatic — și împingea bara ferestrei afară din ecran, lăsând
+          // banda neagră dedesubt.
+          try{
+            const tinta=primul.offsetTop-(corpV.clientHeight/2)+(primul.offsetHeight/2);
+            corpV.scrollTo({top:Math.max(0,tinta), behavior:'smooth'});
+          }catch(e){ corpV.scrollTop=Math.max(0, primul.offsetTop-80); }
           primul.style.background=prefViz.accent+'aa';
           setTimeout(()=>{ primul.style.background=prefViz.accent+'55'; }, 1200);
         }, 120);
@@ -3011,16 +3025,31 @@ function deschideVizualizareSimpla(f, evidentiaza){
       if(!corpV.contains(r.commonAncestorContainer)) return null;
       const text=sel.toString().trim();
       if(!text) return null;
-      return {text, range:r, dinEditor:false};
+      // Numărăm ACUM a câta apariție e, cât timp selecția e vie. Dacă am amâna
+      // până la apăsarea butonului, textul poate fi între timp redesenat, iar
+      // reperul s-ar pierde — legătura ar cădea pe primul cuvânt potrivit.
+      let inainte=0;
+      try{
+        const inaintea=r.cloneRange();
+        inaintea.selectNodeContents(corpV);
+        inaintea.setEnd(r.startContainer, r.startOffset);
+        const dinainte=inaintea.toString();
+        let i=0;
+        while((i=dinainte.indexOf(text,i))>=0){ inainte++; i+=text.length; }
+      }catch(e){}
+      return {text, inainte, dinEditor:false};
     }
 
-    // ⇄ se aprinde doar când chiar ai ales ceva
+    // ⇄ se aprinde când ai ales ceva.
+    // Ținem minte ULTIMA selecție bună și n-o uităm când se golește: pe Android,
+    // atingerea butonului șterge selecția înainte s-o apucăm noi să o citim, iar
+    // dacă o uitam atunci, o apăsare scurtă nu funcționa — trebuia ținut apăsat.
     let selPastrata=null;
     function potrivesteButonul(){
       const s=selectiaCurenta();
       const bun = !!s && s.text.length>=2 && s.text.length<=150;
-      selPastrata = bun ? s : null;
-      btnLeaga.style.opacity = bun ? '1' : '.25';
+      if(bun) selPastrata=s;
+      btnLeaga.style.opacity = selPastrata ? '1' : '.25';
     }
     const laSelectie=()=>setTimeout(potrivesteButonul, 30);
     document.addEventListener('selectionchange', laSelectie);
@@ -3034,17 +3063,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
       if(sel.dinEditor){
         text=text.slice(0,sel.start)+inlocuire+text.slice(sel.sfarsit);
       } else {
-        // în citire nu știm poziția din sursă, dar știm A CÂTA apariție e:
-        // numărăm aparițiile de dinaintea selecției, în textul de pe ecran
-        let inainte=0;
-        try{
-          const r=sel.range.cloneRange();
-          r.selectNodeContents(corpV);
-          r.setEnd(sel.range.startContainer, sel.range.startOffset);
-          const dinainte=r.toString();
-          let i=0;
-          while((i=dinainte.indexOf(sel.text,i))>=0){ inainte++; i+=sel.text.length; }
-        }catch(e){}
+        // știm A CÂTA apariție e (numărată în clipa alegerii)
+        const inainte=sel.inainte||0;
         let poz=-1, de=0;
         for(let k=0;k<=inainte;k++){
           poz=text.indexOf(sel.text, de);
