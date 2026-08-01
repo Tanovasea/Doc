@@ -2851,8 +2851,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
           const {eticheta, fisier, loc}=Legaturi.despicaTinta(nume);
           const a=document.createElement('span');
           a.className='leg';
-          // cuvintele tale, dacă le-ai dat; altfel ținta, citibil
-          a.textContent = eticheta || (loc ? (fisier+' › '+loc) : fisier);
+          // cuvintele tale, dacă le-ai dat; altfel ținta, citibil.
+          // La [[#frază]] nu există nume de fișier: fără grija asta, eticheta
+          // ieșea „ › frază", cu săgeata atârnând în gol.
+          a.textContent = eticheta || (loc ? ((fisier?fisier+' › ':'')+loc) : fisier);
           // aceeași înfățișare ca legăturile din Documente: pastilă discretă,
           // subliniere plină — se vede că e legătură fără să sară din text
           a.style.cssText='color:'+prefViz.accent+
@@ -2976,7 +2978,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
       if(poz<0) poz=text.indexOf(cautat);
       if(poz<0){ alert('Nu mai găsesc legătura în fișier.'); return; }
-      text=text.slice(0,poz)+(parti.eticheta||parti.fisier)+text.slice(poz+cautat.length);
+      // ce rămâne în text: cuvintele tale; la [[#loc]] nu există nici etichetă,
+      // nici nume de fișier, iar fără `loc` pastila ar dispărea cu totul
+      const ramane = parti.eticheta || parti.fisier || parti.loc || '';
+      text=text.slice(0,poz)+ramane+text.slice(poz+cautat.length);
       f.continut=text;
       await Depozit.scrie(f);
 
@@ -3068,13 +3073,20 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const noduri=[]; let n;
       while((n=plimbare.nextNode())) noduri.push(n);
 
-      let primul=null;
+      let primul=null, primulOricare=null;
       for(const nod of noduri){
         const brut=nod.nodeValue;
         // aceeași funcție care a produs rezultatele căutării, deci marcajul
         // nu poate fi de altă părere decât lista de rezultate
         const locuri=Cautare.potriviriIn(brut, tipar, 100);
         if(!locuri.length) continue;
+        // Eticheta unei legături conține chiar cuvântul spre care trimite.
+        // Dacă săream la prima potrivire din pagină, un [[#libelulă]] pus sus
+        // se găsea pe sine și rămâneai pe loc; unul pus jos părea că merge,
+        // fiindcă adevăratul cuvânt îi era înainte. Marcăm și în etichete,
+        // dar sărim la primul cuvânt din text, nu la o pastilă de legătură.
+        const eEticheta = nod.parentNode && nod.parentNode.closest &&
+                          !!nod.parentNode.closest('.leg');
 
         const bucata=document.createDocumentFragment();
         let de=0;
@@ -3085,12 +3097,15 @@ function deschideVizualizareSimpla(f, evidentiaza){
           marcaj.textContent=brut.slice(s,e);
           marcaj.style.cssText='background:'+prefViz.accent+'55;color:inherit;border-radius:3px;padding:0 2px';
           bucata.appendChild(marcaj);
-          if(!primul) primul=marcaj;
+          if(!primulOricare) primulOricare=marcaj;
+          if(!primul && !eEticheta) primul=marcaj;
           de=e;
         }
         if(de<brut.length) bucata.appendChild(document.createTextNode(brut.slice(de)));
         nod.parentNode.replaceChild(bucata, nod);
       }
+      // dacă vorba apare numai în etichete de legătură, măcar acolo sărim
+      if(!primul) primul=primulOricare;
       if(primul){
         setTimeout(()=>{
           // Derulăm NUMAI cadrul textului. `scrollIntoView` derulează toți
@@ -3313,6 +3328,9 @@ function deschideVizualizareSimpla(f, evidentiaza){
       m.appendChild(buton('🔗 Leagă spre alt fișier', prefViz.accent, ()=>{
         alegeTinta({text:alesText, inainte:alesInainte, dinEditor:false});
       }));
+      m.appendChild(buton('↳ Leagă în fișierul acesta', prefViz.accent, ()=>{
+        alegeLoculAici({text:alesText, inainte:alesInainte, dinEditor:false});
+      }));
       m.appendChild(buton('📋 Copiază', '#c9d1d9', ()=>{
         try{ navigator.clipboard.writeText(alesText); }catch(e){}
         curataAles();
@@ -3362,7 +3380,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
       try{
         const dr=root.getBoundingClientRect();
         let sus=y-dr.top+10, stanga=x-dr.left-20;
-        if(sus+190>root.clientHeight) sus=Math.max(6, y-dr.top-200);
+        // meniul are acum un rând în plus (legătura în același fișier)
+        if(sus+240>root.clientHeight) sus=Math.max(6, y-dr.top-250);
         stanga=Math.max(8, Math.min(stanga, root.clientWidth-220));
         m.style.top=sus+'px'; m.style.left=stanga+'px';
       }catch(e){ m.style.top='60px'; m.style.left='20px'; }
@@ -3555,6 +3574,60 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
       c.camp.addEventListener('input',()=>randeaza(c.camp.value));
       randeaza('');
+    }
+
+    // ---- LEGĂTURĂ ÎN ACELAȘI FIȘIER: [[cuvintele tale|#loc]] ----
+    // Aceeași pastilă, dar ținta e aici, pe pagină. N-are capăt de întoarcere:
+    // ar fi o legătură a fișierului cu el însuși, iar cele două capete s-ar
+    // căuta unul pe altul la fiecare ștergere.
+    async function scrieLegaturaInterna(sel, loc){
+      let text=f.continut||'';
+      let poz=aparitieLibera(text, sel.text, sel.inainte||0);
+      if(poz<0) poz=aparitieLibera(text, sel.text, 0);
+      if(poz<0){
+        alert('Nu găsesc textul ales în fișier — probabil are marcaje de formatare, sau e deja parte dintr-o legătură.\n\nÎncearcă din modul de scriere (✎).');
+        return;
+      }
+      text=text.slice(0,poz)+'[['+sel.text+'|#'+loc+']]'+text.slice(poz+sel.text.length);
+      f.continut=text;
+      await Depozit.scrie(f);
+      curataAles();
+      randeazaCorp(false);
+      instiintare('Legat aici, spre „'+loc+'".');
+    }
+
+    function alegeLoculAici(sel){
+      const scurt=sel.text.length>40 ? sel.text.slice(0,40)+'…' : sel.text;
+      const c=cutiaDeAles('„'+scurt+'"  →  spre ce loc din fișierul acesta?');
+      c.camp.placeholder='caută un cuvânt din pagina asta…';
+      const brut=f.continut||'';
+      // unde stă chiar bucata pe care o facem legătură: n-are rost să trimită
+      // la ea însăși
+      const aici=aparitieLibera(brut, sel.text, sel.inainte||0);
+
+      function randeaza(filtru){
+        c.lista.innerHTML='';
+        const q=(filtru||'').trim();
+        if(q.length<2){ randNimic(c.lista,'Scrie două litere ca să vezi unde apar în fișierul acesta.'); return; }
+        const tipar=Cautare.tiparPentru(q);
+        const gasite=(tipar?Cautare.potriviriIn(brut, tipar, 30):[])
+          .filter(([a,b])=> !inLegatura(brut,a) &&
+                            !(aici>=0 && a<aici+sel.text.length && b>aici));
+        if(!gasite.length){ randNimic(c.lista,'Nu apare în altă parte a fișierului, ca text liber.'); return; }
+        // toate aparițiile aceluiași cuvânt duc la aceeași legătură, [[…|#cuvânt]];
+        // săritura ajunge la prima din pagină. Lista e aici ca să vezi unde e.
+        for(const [a,b] of gasite){
+          const ctx=brut.slice(Math.max(0,a-40), Math.min(brut.length,b+40)).replace(/\s+/g,' ');
+          const r=document.createElement('div');
+          r.style.cssText='padding:10px 4px;border-bottom:1px solid #21262d;font-size:.84rem;cursor:pointer;line-height:1.5';
+          r.textContent='…'+ctx+'…';
+          r.addEventListener('click',()=>{ c.inchide(); scrieLegaturaInterna(sel, brut.slice(a,b)); });
+          c.lista.appendChild(r);
+        }
+      }
+      c.camp.addEventListener('input',()=>randeaza(c.camp.value));
+      randeaza('');
+      setTimeout(()=>c.camp.focus(), 150);
     }
 
     // pasul 2: spre ce loc din fișierul acela
