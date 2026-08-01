@@ -1853,6 +1853,10 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
     // localStorage — adică sandbox-ul nu exista. Acum are origine opacă:
     // nu vede nimic din Logos, comunică doar prin punte (postMessage).
     ifr.setAttribute('sandbox','allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads'+(deplin?' allow-same-origin':''));
+    // GPS-ul trece prin punte, nu direct: o origine opacă nu poate primi
+    // permisiunea de geolocație de la browser. `allow` de mai jos folosește
+    // doar aplicațiilor cu acces deplin, care au origine adevărată.
+    ifr.setAttribute('allow','geolocation');
     ifr.style.cssText='flex:1;width:100%;border:none;background:#fff';
     wrap.appendChild(ifr);
 
@@ -1970,6 +1974,62 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
             window.Worker=function(u){ raporteaza('aplicația cere un Worker ('+String(u).slice(0,80)+') — deseori blocat de izolare'); return new W(u); };
           }
         }catch(e){}
+
+        // ---- GPS prin punte ----
+        // O origine opacă nu poate primi permisiunea de geolocație de la browser.
+        // Punem în loc un navigator.geolocation care cere poziția de la Logos,
+        // el având origine adevărată. Aplicația nu observă diferența:
+        // aceleași metode, aceleași obiecte de poziție și de eroare.
+        (function(){
+          var ceruri={}, urmariri={}, nrCerere=0;
+          function pozitiaLogos(p){
+            return {coords:{latitude:p.lat, longitude:p.lon, accuracy:p.acc,
+                            altitude:p.alt, altitudeAccuracy:p.altAcc,
+                            heading:p.dir, speed:p.viteza},
+                    timestamp:p.cand};
+          }
+          function eroareLogos(e){
+            return {code:e.code||2, message:e.message||'Poziția nu e disponibilă.',
+                    PERMISSION_DENIED:1, POSITION_UNAVAILABLE:2, TIMEOUT:3};
+          }
+          window.addEventListener('message', function(ev){
+            var d=ev.data;
+            if(!d || d.logosGps!==CHEIE) return;
+            var set = (d.fel==='urmarire') ? urmariri : ceruri;
+            var c = set[d.id];
+            if(!c) return;
+            if(d.eroare){ if(c.laEroare) c.laEroare(eroareLogos(d.eroare)); }
+            else if(c.laReusita){ c.laReusita(pozitiaLogos(d.pozitie)); }
+            if(d.fel!=='urmarire') delete ceruri[d.id];
+          });
+          function cere(fel, id, optiuni){
+            try{
+              parent.postMessage({logosGps:CHEIE, cerere:fel, id:id,
+                                  optiuni:{precis:!!(optiuni&&optiuni.enableHighAccuracy),
+                                           rabdare:(optiuni&&optiuni.timeout)||0,
+                                           vechime:(optiuni&&optiuni.maximumAge)||0}}, '*');
+            }catch(e){}
+          }
+          var gpsFals = {
+            getCurrentPosition: function(laReusita, laEroare, optiuni){
+              var id=++nrCerere;
+              ceruri[id]={laReusita:laReusita, laEroare:laEroare};
+              cere('o-data', id, optiuni);
+            },
+            watchPosition: function(laReusita, laEroare, optiuni){
+              var id=++nrCerere;
+              urmariri[id]={laReusita:laReusita, laEroare:laEroare};
+              cere('urmarire', id, optiuni);
+              return id;
+            },
+            clearWatch: function(id){
+              delete urmariri[id];
+              try{ parent.postMessage({logosGps:CHEIE, cerere:'opreste', id:id}, '*'); }catch(e){}
+            }
+          };
+          try{ Object.defineProperty(navigator,'geolocation',{value:gpsFals, configurable:true}); }
+          catch(e){ try{ navigator.geolocation=gpsFals; }catch(_){ raporteaza('nu am putut lega GPS-ul la punte'); } }
+        })();
       })();
       <\/script>`;
 
@@ -2003,6 +2063,62 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
       })();
     }
     window.addEventListener('message', laCamara);
+
+    // ---- SERVICIUL GPS ----
+    // Oaspetele nu poate cere poziția direct (origine opacă), așa că o cerem noi
+    // și i-o trimitem. Permisiunea se cere o singură dată per aplicație; browserul
+    // și-o cere separat pe a lui, tot o dată, pentru originea Logos.
+    const urmaririGps=new Map();     // idOaspete -> idWatch al browserului
+    function trimiteGps(id, fel, pozitie, eroare){
+      const msg={logosGps:cheieCamara, id, fel};
+      if(eroare) msg.eroare={code:eroare.code, message:eroare.message};
+      else msg.pozitie={lat:pozitie.coords.latitude, lon:pozitie.coords.longitude,
+                        acc:pozitie.coords.accuracy, alt:pozitie.coords.altitude,
+                        altAcc:pozitie.coords.altitudeAccuracy,
+                        dir:pozitie.coords.heading, viteza:pozitie.coords.speed,
+                        cand:pozitie.timestamp};
+      raspunde(msg);
+    }
+    async function laGps(ev){
+      if(ev.source!==ifr.contentWindow) return;
+      const d=ev.data;
+      if(!d || d.logosGps!==cheieCamara || !d.cerere) return;
+
+      if(d.cerere==='opreste'){
+        const w=urmaririGps.get(d.id);
+        if(w!==undefined){ navigator.geolocation.clearWatch(w); urmaririGps.delete(d.id); }
+        return;
+      }
+      if(!navigator.geolocation){
+        trimiteGps(d.id, d.cerere, null, {code:2, message:'Dispozitivul nu are geolocație.'});
+        return;
+      }
+      // permisiunea ta, cerută o singură dată per aplicație
+      if(!Proprietate.arePermisiune(numeApp, '@gps')){
+        const ok=confirm('„'+numeApp+'" cere accesul la locația ta'+
+          (d.cerere==='urmarire' ? ', în continuu cât e deschisă.' : '.')+'\n\nPermiți?');
+        if(!ok){
+          trimiteGps(d.id, d.cerere, null, {code:1, message:'Ai refuzat accesul la locație.'});
+          return;
+        }
+        await Proprietate.permite(numeApp, '@gps');
+      }
+      const opt={enableHighAccuracy:!!(d.optiuni&&d.optiuni.precis),
+                 timeout:(d.optiuni&&d.optiuni.rabdare)||30000,
+                 maximumAge:(d.optiuni&&d.optiuni.vechime)||0};
+      if(d.cerere==='urmarire'){
+        if(urmaririGps.has(d.id)) return;                       // deja pornită
+        const w=navigator.geolocation.watchPosition(
+          p=>trimiteGps(d.id,'urmarire',p,null),
+          e=>trimiteGps(d.id,'urmarire',null,e), opt);
+        urmaririGps.set(d.id, w);
+      } else {
+        navigator.geolocation.getCurrentPosition(
+          p=>trimiteGps(d.id,'o-data',p,null),
+          e=>trimiteGps(d.id,'o-data',null,e), opt);
+      }
+    }
+    window.addEventListener('message', laGps);
 
     // puntea: ascultă mesajele DOAR de la acest iframe
     function raspunde(msg){ try{ ifr.contentWindow.postMessage(msg,'*'); }catch(e){} }
@@ -2067,6 +2183,11 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
     return ()=>{
       window.removeEventListener('message',laMesaj);
       window.removeEventListener('message',laCamara);
+      window.removeEventListener('message',laGps);
+      // GPS-ul continuu ține radioul aprins: dacă uităm să-l oprim, mănâncă bateria
+      // în fundal chiar și după ce fereastra a dispărut de pe ecran.
+      urmaririGps.forEach(w=>{ try{ navigator.geolocation.clearWatch(w); }catch(e){} });
+      urmaririGps.clear();
       if(adresaBlob){ try{ URL.revokeObjectURL(adresaBlob); }catch(e){} }
     };
   },{}, {appId:'oaspete:'+numeApp+(fisierAsociat?(':'+fisierAsociat.cale):''), iconita:'▷'});
