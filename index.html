@@ -51,7 +51,13 @@
   #iesire-term, .corp-fereastra pre, .ed-area, textarea, input{
     -webkit-user-select:text;user-select:text;
   }
-  .viz-corp, .corp-fereastra .vd{
+  /* ȘI `pre` din vizualizator. Regula de deasupra (`.corp-fereastra pre`) îl
+     făcea selectabil, așa că la fișierele care nu sunt .md — și la blocurile
+     de cod din .md — Android își pornea selecția lui la apăsarea lungă:
+     cuvântul se marca (albastru, al lui), gestul nostru era anulat, iar meniul
+     de legătură nu mai apărea niciodată. Aceleași reguli, aceeași specificitate,
+     dar scrise mai jos: câștigă acestea. */
+  .viz-corp, .corp-fereastra .vd, .viz-corp pre, .corp-fereastra .vd pre{
     -webkit-user-select:none;user-select:none;
     -webkit-touch-callout:none;
   }
@@ -2822,6 +2828,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const plimbare=document.createTreeWalker(corpV, NodeFilter.SHOW_TEXT);
       const noduri=[]; let n;
       while((n=plimbare.nextNode())) noduri.push(n);
+      // Aceeași legătură poate apărea de mai multe ori în același fișier.
+      // Ținem minte a câta e fiecare, ca ștergerea s-o desfacă exact pe cea
+      // apăsată, nu pe prima din text.
+      const catVazute=new Map();
 
       for(const nod of noduri){
         if(nod.parentNode && nod.parentNode.classList &&
@@ -2835,6 +2845,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
           ceva=true;
           if(m.index>de) bucata.appendChild(document.createTextNode(brut.slice(de,m.index)));
           const brutInterior=m[1];              // exact cum e scris, pentru ștergere
+          const rand=catVazute.get(brutInterior)||0;
+          catVazute.set(brutInterior, rand+1);
           const nume=m[1].trim();
           const {eticheta, fisier, loc}=Legaturi.despicaTinta(nume);
           const a=document.createElement('span');
@@ -2875,7 +2887,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
             cronoLung=setTimeout(()=>{
               aFostLung=true;
               if(navigator.vibrate) { try{ navigator.vibrate(18); }catch(e){} }
-              meniulLegaturii(a, brutInterior, {eticheta, fisier, loc});
+              meniulLegaturii(a, brutInterior, {eticheta, fisier, loc}, rand);
             }, 520);
           };
           const opreste=()=>clearTimeout(cronoLung);
@@ -2900,7 +2912,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
        Ca la Documente: un meniu mic lângă cuvânt, cu deschidere și ștergere.
        Ștergerea desface AMBELE capete — altfel ar rămâne o legătură care duce
        spre un cuvânt ce nu mai trimite înapoi. */
-    function meniulLegaturii(elem, brutInterior, parti){
+    function meniulLegaturii(elem, brutInterior, parti, rand){
       root.querySelectorAll('.leg-meniu').forEach(x=>x.remove());
       const m=document.createElement('div');
       m.className='leg-meniu';
@@ -2923,7 +2935,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
           if(t) deschideCuApp(t, parti.loc||'');
         }));
       }
-      m.appendChild(buton('🗑 Șterge legătura', '#f85149', ()=>stergeLegatura(brutInterior, parti)));
+      m.appendChild(buton('🗑 Șterge legătura', '#f85149', ()=>stergeLegatura(brutInterior, parti, rand)));
       m.appendChild(buton('renunță', '#8b949e', ()=>{}));
 
       root.appendChild(m);
@@ -2948,20 +2960,31 @@ function deschideVizualizareSimpla(f, evidentiaza){
     }
 
     // desface legătura din fișierul acesta ȘI perechea ei din fișierul țintă
-    async function stergeLegatura(brutInterior, parti){
+    async function stergeLegatura(brutInterior, parti, rand){
       const vizibil = parti.eticheta || (parti.loc ? (parti.fisier+' › '+parti.loc) : parti.fisier);
       if(!confirm('Ștergi legătura „'+vizibil+'"?\n\nSe desface din ambele fișiere; textul rămâne.')) return;
 
-      // 1) aici: [[...]] → doar cuvintele, fără paranteze
+      // 1) aici: [[...]] → doar cuvintele, fără paranteze.
+      //    A câta apariție a ei e, dacă legătura se repetă în text.
       const cautat='[['+brutInterior+']]';
       let text=f.continut||'';
-      const poz=text.indexOf(cautat);
+      let poz=-1, de=0;
+      for(let k=0;k<=(rand||0);k++){
+        poz=text.indexOf(cautat, de);
+        if(poz<0) break;
+        de=poz+cautat.length;
+      }
+      if(poz<0) poz=text.indexOf(cautat);
       if(poz<0){ alert('Nu mai găsesc legătura în fișier.'); return; }
       text=text.slice(0,poz)+(parti.eticheta||parti.fisier)+text.slice(poz+cautat.length);
       f.continut=text;
       await Depozit.scrie(f);
 
-      // 2) în fișierul țintă: perechea care trimite înapoi spre noi
+      // 2) în fișierul țintă: perechea care trimite înapoi spre noi.
+      //    Adunăm întâi TOATE legăturile de acolo care arată spre fișierul
+      //    acesta, apoi alegem. Înainte ne opream la prima care semăna, așa
+      //    că, între două fișiere legate de mai multe ori, se desfăcea altă
+      //    pereche decât cea cerută — sau niciuna, și rămânea agățată.
       let siDincolo=false, numeDincolo='';
       if(parti.fisier){
         try{
@@ -2970,22 +2993,25 @@ function deschideVizualizareSimpla(f, evidentiaza){
             const tt=tinta.continut||'';
             const re=new RegExp(Legaturi.TIPAR.source,'g');
             const la=a=>Cautare.simplu(a||'');
-            let mm, gasitLa=-1, gasitBrut='', gasitText='';
+            const candidati=[]; let mm;
             while((mm=re.exec(tt))){
               const p=Legaturi.despicaTinta(mm[1].trim());
               if(!p.fisier || Legaturi.cheie(p.fisier)!==Legaturi.cheie(f.cale)) continue;
-              // perechea poate fi scrisă în oricare din cele două orientări:
-              // ori eticheta ei e locul spre care trimiteam noi, ori locul ei
-              // e cuvântul nostru. Acceptăm ambele, ca să nu rămână agățată.
-              const potrivit = (parti.loc && la(p.eticheta)===la(parti.loc)) ||
-                               (parti.eticheta && la(p.loc)===la(parti.eticheta)) ||
-                               (parti.loc && la(p.loc)===la(parti.eticheta||'') && la(p.eticheta)===la(parti.loc));
-              if(potrivit){
-                gasitLa=mm.index; gasitBrut=mm[0]; gasitText=p.eticheta||p.fisier; break;
-              }
+              candidati.push({poz:mm.index, brut:mm[0], p});
             }
-            if(gasitLa>=0){
-              tinta.continut=tt.slice(0,gasitLa)+gasitText+tt.slice(gasitLa+gasitBrut.length);
+            // oglinda curată: eticheta ei e locul nostru, locul ei e eticheta noastră
+            const oglinda = c => parti.loc && parti.eticheta &&
+                                 la(c.p.eticheta)===la(parti.loc) &&
+                                 la(c.p.loc)===la(parti.eticheta);
+            // pe jumătate: se potrivește măcar un capăt (legături mai vechi,
+            // scrise când perechea se făcea altfel)
+            const jumatate = c => (parti.loc && la(c.p.eticheta)===la(parti.loc)) ||
+                                  (parti.eticheta && la(c.p.loc)===la(parti.eticheta));
+            const ales = candidati.find(oglinda) || candidati.find(jumatate) ||
+                         (candidati.length===1 ? candidati[0] : null);
+            if(ales){
+              const gasitText=ales.p.eticheta||ales.p.fisier;
+              tinta.continut=tt.slice(0,ales.poz)+gasitText+tt.slice(ales.poz+ales.brut.length);
               await Depozit.scrie(tinta);
               improspateazaFereastra(tinta.cale);
               siDincolo=true; numeDincolo=tinta.cale;
@@ -3207,14 +3233,28 @@ function deschideVizualizareSimpla(f, evidentiaza){
       return raza;
     }
 
-    // a câta apariție e, în textul de pe ecran (reperul pentru scriere)
+    // A câta apariție e, în textul de pe ecran — reperul după care o găsim
+    // în fișier. Sărim peste ce e deja legătură: pe ecran o legătură arată
+    // doar eticheta, dar în fișier stă scrisă întreagă, `[[etichetă|țintă]]`.
+    // Dacă am număra una și am căuta alta, legătura nouă se scria peste alt
+    // cuvânt — uneori chiar în mijlocul unei legături vechi, stricând-o.
+    // Aici și în `scrieLegatura` numărăm după aceeași regulă.
+    function textDeDinainte(nod, offset){
+      let s='';
+      const plimbare=document.createTreeWalker(corpV, NodeFilter.SHOW_TEXT);
+      let n;
+      while((n=plimbare.nextNode())){
+        const p=n.parentNode;
+        const eLeg = p && p.closest && p.closest('.leg');
+        if(n===nod){ if(!eLeg) s+=n.nodeValue.slice(0, offset); break; }
+        if(!eLeg) s+=n.nodeValue;
+      }
+      return s;
+    }
     function catAparitiiInainte(raza, text){
       let n=0;
       try{
-        const inaintea=raza.cloneRange();
-        inaintea.selectNodeContents(corpV);
-        inaintea.setEnd(raza.startContainer, raza.startOffset);
-        const dinainte=inaintea.toString();
+        const dinainte=textDeDinainte(raza.startContainer, raza.startOffset);
         let i=0;
         while((i=dinainte.indexOf(text,i))>=0){ n++; i+=text.length; }
       }catch(e){}
@@ -3341,48 +3381,71 @@ function deschideVizualizareSimpla(f, evidentiaza){
     }
 
     // ---- apăsare lungă pe text: alege cuvântul ----
-    let cronoText=null, punctApasare=null;
+    // Așteptăm 440 ms, nu 520: Android își pornește gesturile lui pe la 500,
+    // iar cine ajungea al doilea rămânea fără nimic.
+    let cronoText=null, punctApasare=null, candApasat=0;
+    function alegeSubDeget(){
+      cronoText=null;
+      if(!punctApasare) return;
+      const raza=razaLaPunct(punctApasare.x, punctApasare.y);
+      if(!raza) return;
+      if(!arataAles(raza)) return;
+      if(navigator.vibrate){ try{ navigator.vibrate(18); }catch(e){} }
+      meniulCuvantului(punctApasare.x, punctApasare.y);
+    }
     corpV.addEventListener('pointerdown', ev=>{
       if(mod==='editare') return;
       if(ev.target.closest && ev.target.closest('.leg')) return;   // legăturile au meniul lor
       if(ev.target.closest && ev.target.closest('.leg-meniu')) return;
       punctApasare={x:ev.clientX, y:ev.clientY};
+      candApasat=Date.now();
       clearTimeout(cronoText);
-      cronoText=setTimeout(()=>{
-        const raza=razaLaPunct(punctApasare.x, punctApasare.y);
-        if(!raza) return;
-        if(!arataAles(raza)) return;
-        if(navigator.vibrate){ try{ navigator.vibrate(18); }catch(e){} }
-        meniulCuvantului(punctApasare.x, punctApasare.y);
-      }, 520);
+      cronoText=setTimeout(alegeSubDeget, 440);
     }, true);
-    const opresteCrono=()=>clearTimeout(cronoText);
+    const opresteCrono=()=>{ clearTimeout(cronoText); cronoText=null; };
     corpV.addEventListener('pointerup', opresteCrono);
     corpV.addEventListener('pointermove', ev=>{
-      if(!punctApasare) return;
+      if(!punctApasare || !cronoText) return;
       if(Math.abs(ev.clientX-punctApasare.x)>10 || Math.abs(ev.clientY-punctApasare.y)>10) opresteCrono();
     });
-    corpV.addEventListener('pointercancel', opresteCrono);
+    // Sistemul poate rupe șirul de atingeri când pornește un gest de-al lui
+    // (selecție, tras, derulare). Dacă degetul stătea pe loc și apăsarea era
+    // aproape gata, o ducem noi la capăt — altfel cuvântul rămânea marcat,
+    // fără meniu, exact plângerea „țin apăsat și nu apare caseta".
+    corpV.addEventListener('pointercancel', ()=>{
+      if(cronoText && Date.now()-candApasat>300){ clearTimeout(cronoText); alegeSubDeget(); }
+      else opresteCrono();
+    });
     corpV.addEventListener('contextmenu', ev=>{ if(mod!=='editare') ev.preventDefault(); });
 
     // scrie legătura în text, exact peste bucata aleasă.
     // `tintaFis` e înregistrarea fișierului-țintă, ca să putem lega și înapoi.
-    async function scrieLegatura(sel, tinta, loc, tintaFis){
+    // prima apariție liberă a unui text (una care nu e deja înăuntrul unei
+    // legături), sărind peste primele `inainte` apariții libere
+    function aparitieLibera(text, cautat, inainte){
+      let de=0, sarite=0, p;
+      while((p=text.indexOf(cautat, de))>=0){
+        de=p+cautat.length;
+        if(inLegatura(text, p)) continue;
+        if(sarite>=(inainte||0)) return p;
+        sarite++;
+      }
+      return -1;
+    }
+
+    async function scrieLegatura(sel, tinta, loc, tintaFis, pozAleasa){
       const inlocuire='[['+sel.text+'|'+tinta+(loc?('#'+loc):'')+']]';
       let text=f.continut||'';
       if(sel.dinEditor){
         text=text.slice(0,sel.start)+inlocuire+text.slice(sel.sfarsit);
       } else {
-        // știm A CÂTA apariție e (numărată în clipa alegerii)
-        const inainte=sel.inainte||0;
-        let poz=-1, de=0;
-        for(let k=0;k<=inainte;k++){
-          poz=text.indexOf(sel.text, de);
-          if(poz<0) break;
-          de=poz+sel.text.length;
-        }
+        // știm A CÂTA apariție liberă e (numărată în clipa alegerii)
+        let poz=aparitieLibera(text, sel.text, sel.inainte||0);
+        // dacă numărătoarea n-a nimerit (formatare între cuvinte), luăm
+        // prima apariție liberă: tot mai bine decât să nu se scrie nimic
+        if(poz<0) poz=aparitieLibera(text, sel.text, 0);
         if(poz<0){
-          alert('Nu găsesc textul ales în fișier — probabil are marcaje de formatare.\n\nÎncearcă din modul de scriere (✎).');
+          alert('Nu găsesc textul ales în fișier — probabil are marcaje de formatare, sau e deja parte dintr-o legătură.\n\nÎncearcă din modul de scriere (✎).');
           return;
         }
         text=text.slice(0,poz)+inlocuire+text.slice(poz+sel.text.length);
@@ -3392,24 +3455,46 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
       // ---- CELĂLALT CAPĂT ----
       // Legăm și cuvântul din fișierul-țintă înapoi spre acesta, ca amândouă
-      // să fie atingibile. Altfel un capăt era legătură, celălalt text simplu.
+      // să fie atingibile. Altfel un capăt era legătură, celălalt text simplu
+      // — și mai târziu, la ștergere, „se desface doar dintr-o parte", fiindcă
+      // partea cealaltă nu existase niciodată.
+      let ambele=false, deCe='';
       if(loc && tintaFis){
         try{
           // recitim ținta chiar acum: copia din listă poate fi veche
           const tf=await Depozit.gaseste(tintaFis.cale) || tintaFis;
           const tt=tf.continut||'';
-          const undeE=tt.indexOf(loc);
-          if(undeE>=0 && !inLegatura(tt, undeE)){
+          // exact locul pe care l-ai ales din listă, dacă textul n-a fost
+          // schimbat între timp. Înainte luam mereu PRIMA apariție a
+          // cuvântului: dacă aceea era deja legătură, capătul de întoarcere
+          // nu se mai scria — în tăcere.
+          let undeE=-1;
+          if(typeof pozAleasa==='number' &&
+             tt.slice(pozAleasa, pozAleasa+loc.length)===loc &&
+             !inLegatura(tt, pozAleasa)) undeE=pozAleasa;
+          else undeE=aparitieLibera(tt, loc, 0);
+          if(undeE>=0){
             const inapoi='[['+loc+'|'+f.cale+'#'+sel.text+']]';
             tf.continut=tt.slice(0,undeE)+inapoi+tt.slice(undeE+loc.length);
             await Depozit.scrie(tf);
             improspateazaFereastra(tf.cale);
+            ambele=true;
+          } else {
+            deCe='„'+loc+'" e deja parte dintr-o legătură în '+tf.cale;
           }
-        }catch(e){ console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e); }
+        }catch(e){
+          deCe='n-am putut scrie în '+tintaFis.cale;
+          console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e);
+        }
+      } else if(!loc){
+        deCe='ai ales începutul fișierului, nu un cuvânt anume';
       }
 
       curataAles();
       randeazaCorp(false);
+      // spunem pe față dacă a ieșit legătură în ambele sensuri sau doar într-unul
+      if(ambele) instiintare('Legat în ambele fișiere.');
+      else instiintare('Legat doar aici — '+(deCe||'fără capăt de întoarcere')+'.');
     }
 
     // cutia de jos, folosită de ambii pași
@@ -3496,7 +3581,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
           const r=document.createElement('div');
           r.style.cssText='padding:10px 4px;border-bottom:1px solid #21262d;font-size:.84rem;cursor:pointer;line-height:1.5';
           r.textContent='…'+ctx+'…';
-          r.addEventListener('click',()=>{ c.inchide(); scrieLegatura(sel, tinta.cale, brut.slice(a,b), tinta); });
+          r.addEventListener('click',()=>{ c.inchide(); scrieLegatura(sel, tinta.cale, brut.slice(a,b), tinta, a); });
           c.lista.appendChild(r);
         }
       }
