@@ -1826,6 +1826,29 @@ const Cautare = (()=>{
   function simplu(s){
     return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   }
+
+  // Simplificare CU hartă de poziții.
+  // Nu putem presupune că textul simplificat are aceeași lungime ca originalul:
+  // dacă diacriticele vin descompuse în fișier („s"+semn separat, cum ajung din
+  // multe surse), simplificarea scurtează textul și toate pozițiile de după alunecă.
+  // Harta spune, pentru fiecare literă simplificată, unde stă în textul adevărat.
+  function simpluCuHarta(text){
+    const t=String(text==null?'':text);
+    let rez='';
+    const catre=[];                 // indice în rez -> indice în t
+    for(let i=0;i<t.length;i++){
+      const bucata=t[i].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      for(let k=0;k<bucata.length;k++){ rez+=bucata[k]; catre.push(i); }
+    }
+    catre.push(t.length);           // capăt, ca să putem cere și sfârșitul ultimei potriviri
+    return {simplu:rez, catre, brut:t};
+  }
+  // traduce o potrivire din textul simplificat înapoi în textul adevărat
+  function inapoi(harta, start, sfarsit){
+    const s=harta.catre[start]!==undefined ? harta.catre[start] : harta.brut.length;
+    const e=harta.catre[sfarsit]!==undefined ? harta.catre[sfarsit] : harta.brut.length;
+    return [s, e];
+  }
   function cuvinte(text){
     return simplu(text).split(/[^a-z0-9]+/).filter(c=>c.length>=MIN);
   }
@@ -1888,7 +1911,8 @@ const Cautare = (()=>{
     for(const cale of candidati){
       const f=await Depozit.gaseste(cale);
       if(!f || typeof f.continut!=='string') continue;
-      const corpSimplu=simplu(f.continut);
+      const harta=simpluCuHarta(f.continut);
+      const corpSimplu=harta.simplu;
       const potriviriAici=[];
 
       if(eFraza){
@@ -1896,13 +1920,17 @@ const Cautare = (()=>{
         const tipar=parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
         const re=new RegExp(tipar,'g');
         let m;
-        while((m=re.exec(corpSimplu)) && potriviriAici.length<50) potriviriAici.push({poz:m.index, lung:m[0].length});
+        while((m=re.exec(corpSimplu)) && potriviriAici.length<50){
+          const [s,e]=inapoi(harta, m.index, m.index+m[0].length);
+          potriviriAici.push({poz:s, lung:e-s});
+        }
       } else {
         let de=0;
         while(potriviriAici.length<50){
           const i=corpSimplu.indexOf(qSimplu, de);
           if(i<0) break;
-          potriviriAici.push({poz:i, lung:qSimplu.length});
+          const [s,e]=inapoi(harta, i, i+qSimplu.length);
+          potriviriAici.push({poz:s, lung:e-s});
           de=i+qSimplu.length;
         }
       }
@@ -1939,7 +1967,7 @@ const Cautare = (()=>{
     };
   }
 
-  return {construieste, cauta, actualizeaza, uita, esteGata, statistici, simplu, fragmentDin};
+  return {construieste, cauta, actualizeaza, uita, esteGata, statistici, simplu, simpluCuHarta, inapoi, fragmentDin};
 })();
 
 /* ---------- FEREASTRĂ CĂTRE APLICAȚIILE INTERNE ----------
@@ -2460,14 +2488,16 @@ function deschideVizualizareSimpla(f, evidentiaza){
       let primul=null;
       for(const nod of noduri){
         const brut=nod.nodeValue;
-        const simplu=Cautare.simplu(brut);
+        const harta=Cautare.simpluCuHarta(brut);
         const re=new RegExp(tipar,'g');
         const locuri=[]; let m;
-        while((m=re.exec(simplu))) locuri.push([m.index, m.index+m[0].length]);
+        while((m=re.exec(harta.simplu))){
+          // traducem înapoi în textul adevărat: simplificarea poate scurta textul
+          // (diacritice descompuse), iar fără traducere marcajul cade lângă cuvânt
+          locuri.push(Cautare.inapoi(harta, m.index, m.index+m[0].length));
+        }
         if(!locuri.length) continue;
 
-        // simplu() păstrează lungimea (NFD scoate doar semnele diacritice
-        // combinate, iar noi le eliminăm), deci indicii se potrivesc peste text.
         const bucata=document.createDocumentFragment();
         let de=0;
         for(const [s,e] of locuri){
@@ -3167,14 +3197,18 @@ Nucleu.inregistreaza({
     }
 
     // rând cu un fișier APĂSABIL — tap pe el îl deschide
-    function scrieFisier(f, extra){
+    function scrieFisier(f, extra, evidentiaza){
       const d=document.createElement('div'); d.className='ln rand-fis';
       const n=document.createElement('span'); n.className='fis-link'; n.textContent=f.cale;
       d.appendChild(n);
       if(extra){ const e=document.createElement('span'); e.className='fis-extra'; e.textContent='  '+extra; d.appendChild(e); }
-      n.addEventListener('click',()=>{
+      n.addEventListener('click',async()=>{
         if(f.tip==='folder'){ scrie('('+f.cale+' e un folder)','stins'); return; }
-        deschideCuApp(f);
+        // recitim din depozit: rândul de aici poate fi doar un rezumat, fără conținut,
+        // iar deschiderea cu un fișier gol dă o pagină albă
+        const real=(typeof f.continut==='string') ? f : await Depozit.gaseste(f.cale);
+        if(!real){ scrie('Fișierul nu mai există: '+f.cale,'err'); return; }
+        deschideCuApp(real, evidentiaza);
       });
       iesire.appendChild(d); iesire.scrollTop=iesire.scrollHeight;
     }
@@ -3379,7 +3413,7 @@ Nucleu.inregistreaza({
           let unde='';
           if(r.fragment) unde='…'+r.fragment.inainte.replace(/^…/,'')+'['+r.fragment.potrivit+']'+r.fragment.dupa;
           else if(r.inNume) unde='(în nume)';
-          scrieFisier({cale:r.cale, tip:r.tip}, unde+(r.cateOri>1?('  ('+r.cateOri+'×)'):''));
+          scrieFisier({cale:r.cale, tip:r.tip}, unde+(r.cateOri>1?('  ('+r.cateOri+'×)'):''), q);
         }
         scrie('Găsit în '+rez.length+' fișier(e).','info');
       },
