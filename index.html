@@ -2016,9 +2016,16 @@ const Legaturi = (()=>{
   let dinspre=new Map();        // nume normalizat -> Set de căi care trimit acolo
   let gata=false;
 
-  // „Bunici", „bunici.md", „Jurnal/Bunici" — toate duc la același loc
+  // „Bunici", „bunici.md", „Jurnal/Bunici" — toate duc la același loc.
+  // Iar „Bunici#prispa" duce în Bunici, exact la cuvântul „prispa”.
+  function despicaTinta(nume){
+    const t=String(nume||'');
+    const d=t.indexOf('#');
+    if(d<0) return {fisier:t.trim(), loc:''};
+    return {fisier:t.slice(0,d).trim(), loc:t.slice(d+1).trim()};
+  }
   function cheie(nume){
-    let n=String(nume||'').trim();
+    let n=despicaTinta(nume).fisier;
     n=n.replace(/\.(md|markdown|txt)$/i,'');      // extensia nu contează
     n=n.split('/').pop();                          // nici folderul
     return Cautare.simplu(n);
@@ -2052,8 +2059,10 @@ const Legaturi = (()=>{
     catre.set(f.cale, new Set(tinte));
     for(const t of tinte){
       const k=cheie(t);
-      if(!dinspre.has(k)) dinspre.set(k, new Set());
-      dinspre.get(k).add(f.cale);
+      if(!dinspre.has(k)) dinspre.set(k, new Map());
+      // reținem și trimiterea așa cum e scrisă: din ea știm, la întoarcere,
+      // în ce loc din fișierul-sursă să aterizăm
+      dinspre.get(k).set(f.cale, t);
     }
   }
   function actualizeaza(f){ if(gata){ scoate(f.cale); adauga(f); } }
@@ -2074,8 +2083,13 @@ const Legaturi = (()=>{
   }
   function iesiri(cale){ return Array.from(catre.get(cale)||[]); }
   function intrari(cale){
-    // cine trimite spre fișierul ăsta (după numele lui, oricum ar fi scris)
-    return Array.from(dinspre.get(cheie(cale))||[]).filter(x=>x!==cale);
+    // cine trimite spre fișierul ăsta, și cu ce trimitere anume — ca la
+    // întoarcere să aterizăm exact pe cuvântul din care pleacă legătura
+    const m=dinspre.get(cheie(cale));
+    if(!m) return [];
+    return Array.from(m.entries())
+      .filter(([sursa])=>sursa!==cale)
+      .map(([sursa, trimitere])=>({cale:sursa, trimitere}));
   }
   // trimiteri către fișiere care nu există încă — începuturi de însemnări
   function nerezolvate(toateCaile){
@@ -2093,7 +2107,7 @@ const Legaturi = (()=>{
   }
 
   return {extrage, actualizeaza, uita, construieste, esteGata, rezolva,
-          iesiri, intrari, nerezolvate, cheie, TIPAR};
+          iesiri, intrari, nerezolvate, cheie, despicaTinta, TIPAR};
 })();
 
 /* ---------- INDICATOR DE ERORI ----------
@@ -2642,22 +2656,28 @@ function deschideVizualizareSimpla(f, evidentiaza){
           ceva=true;
           if(m.index>de) bucata.appendChild(document.createTextNode(brut.slice(de,m.index)));
           const nume=m[1].trim();
+          const {fisier, loc}=Legaturi.despicaTinta(nume);
           const a=document.createElement('span');
           a.className='leg';
-          a.textContent=nume;
+          // afișăm frumos: „Bunici#prispa" se citește „Bunici › prispa"
+          a.textContent=loc ? (fisier+' › '+loc) : fisier;
           a.style.cssText='color:'+prefViz.accent+';border-bottom:1px dotted '+prefViz.accent+
             ';cursor:pointer;padding:0 1px';
           a.addEventListener('click', async(ev)=>{
             ev.stopPropagation();
+            if(!fisier){                       // [[#frază]] — un loc din fișierul curent
+              if(loc){ evidentiaza=loc; randeazaCorp(); }
+              return;
+            }
             const tinta=await Legaturi.rezolva(nume);
-            if(tinta){ deschideCuApp(tinta); return; }
+            if(tinta){ deschideCuApp(tinta, loc||''); return; }
             // trimiterea nu are încă un fișier — o poți porni chiar acum
-            if(!confirm('„'+nume+'" nu există încă.\n\nÎl creez?')) return;
-            const cale=/\.[a-z0-9]{1,6}$/i.test(nume) ? nume : (nume+'.md');
+            if(!confirm('„'+fisier+'" nu există încă.\n\nÎl creez?')) return;
+            const cale=/\.[a-z0-9]{1,6}$/i.test(fisier) ? fisier : (fisier+'.md');
             const nou={cale, tip:cale.split('.').pop(), creat:Date.now(),
-                       continut:'# '+nume+'\n\n'};
+                       continut:'# '+fisier+'\n\n'+(loc?(loc+'\n'):'')};
             await Depozit.scrie(nou);
-            deschideCuApp(nou);
+            deschideCuApp(nou, loc||'');
           });
           bucata.appendChild(a);
           de=m.index+m[0].length;
@@ -2679,13 +2699,16 @@ function deschideVizualizareSimpla(f, evidentiaza){
       cap.textContent='Trimit aici ('+dinspre.length+')';
       cap.style.cssText='font-size:.78rem;opacity:.55;margin-bottom:8px;letter-spacing:.04em';
       sectiune.appendChild(cap);
-      for(const cale of dinspre){
+      for(const {cale, trimitere} of dinspre){
+        const loc=Legaturi.despicaTinta(trimitere).loc;
         const r=document.createElement('div');
-        r.textContent='↩ '+cale;
+        r.textContent='↩ '+cale+(loc?('  › '+loc):'');
         r.style.cssText='color:'+prefViz.accent+';font-size:.86rem;padding:5px 0;cursor:pointer';
         r.addEventListener('click', async()=>{
           const alt=await Depozit.gaseste(cale);
-          if(alt) deschideCuApp(alt);
+          // aterizăm pe însăși trimiterea din fișierul-sursă: așa legătura
+          // e cu adevărat în ambele sensuri, fără s-o scrii de două ori
+          if(alt) deschideCuApp(alt, '[['+trimitere+']]');
         });
         sectiune.appendChild(r);
       }
@@ -3873,14 +3896,18 @@ Nucleu.inregistreaza({
             scrie('Trimite spre:','stins');
             for(const t of iesiri){
               const tinta=await Legaturi.rezolva(t);
-              if(tinta) scrieFisier(tinta, '');
+              const loc=Legaturi.despicaTinta(t).loc;
+              if(tinta) scrieFisier(tinta, loc?('› '+loc):'', loc||'');
               else scrie('  [[' + t + ']]  (încă nu există)','stins');
             }
           }
           if(intrari.length){
             scrie('');
             scrie('Trimit aici:','stins');
-            for(const c of intrari) scrieFisier({cale:c}, '');
+            for(const {cale, trimitere} of intrari){
+              const loc=Legaturi.despicaTinta(trimitere).loc;
+              scrieFisier({cale}, loc?('› '+loc):'', '[['+trimitere+']]');
+            }
           }
           if(!iesiri.length && !intrari.length) scrie('Nicio legătură.','stins');
           return;
