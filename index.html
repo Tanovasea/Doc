@@ -2545,8 +2545,27 @@ async function deschideCuApp(f, evidentiaza){
 const PALETA_BG_VIZ=['#0d1117','#16302b','#1e2530','#2a2620','#3a3326','#c9bfad','#e9dfc9','#f3efe6','#ffffff'];
 const PALETA_INK_VIZ=['#c9d1d9','#dfeae3','#e3d3bd','#58a6ff','#d9a441','#9a6a2f','#3a3326','#2a2620','#000000'];
 // preferințe de citire, ținute în memoria sistemului
-let prefViz = { bg:'#0d1117', text:'#c9d1d9', accent:'#58a6ff', font:18, lh:1.7, lumina:0 };
-function incarcaPrefViz(){ const s=Memorie.ia(); if(s&&s.vizPref2) prefViz={...prefViz,...s.vizPref2}; }
+let prefViz = { bg:'#0d1117', text:'#c9d1d9', accent:'#58a6ff', font:18, lh:1.7,
+                lumina:0, lumText:0, cald:0, lat:100 };
+function incarcaPrefViz(){
+  const s=Memorie.ia();
+  if(s&&s.vizPref2) prefViz={...prefViz,...s.vizPref2};
+  // înainte, un singur cursor mișca și fondul, și textul — nu puteai închide
+  // fondul păstrând textul luminos. Aducem vechea setare fără s-o pierdem.
+  if(prefViz.lumText===undefined) prefViz.lumText=Math.round((prefViz.lumina||0)*0.3);
+  if(prefViz.cald===undefined) prefViz.cald=0;
+  if(prefViz.lat===undefined) prefViz.lat=100;
+}
+// lumină + căldură: căldura mută spre chihlimbar sau spre albastru,
+// util seara, când albul rece obosește ochiul
+function culoareViz(hex, lum, cald){
+  let h=hex.replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  let r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  const d=(lum/100)*255, c=(cald||0)/100*255;
+  const t=v=>Math.max(0,Math.min(255,Math.round(v)));
+  const hx=v=>v.toString(16).padStart(2,'0');
+  return '#'+hx(t(r+d+c))+hx(t(g+d+c*0.35))+hx(t(b+d-c*0.6));
+}
 function tonHex(hex, cant){
   let h=hex.replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join('');
   let r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
@@ -2571,10 +2590,13 @@ function deschideVizualizareSimpla(f, evidentiaza){
       <div class="viz-corp"></div>
       <div class="viz-panou">
         <div class="ts-rand"><label>Fundal</label><div class="viz-swBg ed-sw2"></div></div>
-        <div class="ts-rand"><label>Luminozitate (deschis ← → închis)</label><div class="ts-ctrl"><input type="range" class="viz-lumina" min="-50" max="50" step="1"><span class="ts-val viz-luminaV"></span></div></div>
+        <div class="ts-rand"><label>Fondul (închide ← → deschide)</label><div class="ts-ctrl"><input type="range" class="viz-lumina" min="-50" max="50" step="1"><span class="ts-val viz-luminaV"></span></div></div>
         <div class="ts-rand"><label>Culoare text</label><div class="viz-swInk ed-sw2"></div></div>
+        <div class="ts-rand"><label>Textul (stins ← → aprins)</label><div class="ts-ctrl"><input type="range" class="viz-lumText" min="-50" max="50" step="1"><span class="ts-val viz-lumTextV"></span></div></div>
+        <div class="ts-rand"><label>Căldura (rece ← → caldă)</label><div class="ts-ctrl"><input type="range" class="viz-cald" min="-30" max="30" step="1"><span class="ts-val viz-caldV"></span></div></div>
         <div class="ts-rand"><label>Mărime font</label><div class="ts-ctrl"><input type="range" class="viz-font" min="13" max="30" step="1"><span class="ts-val viz-fontV"></span></div></div>
         <div class="ts-rand"><label>Spațiere rânduri</label><div class="ts-ctrl"><input type="range" class="viz-lh" min="1.1" max="2.3" step="0.05"><span class="ts-val viz-lhV"></span></div></div>
+        <div class="ts-rand"><label>Lățimea textului</label><div class="ts-ctrl"><input type="range" class="viz-lat" min="30" max="100" step="5"><span class="ts-val viz-latV"></span></div></div>
         <div class="term-setari-x viz-panou-x">gata</div>
       </div>`;
     c.appendChild(root);
@@ -2598,13 +2620,37 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }).join('');
     }
     // salvare automată (ca în modelul tău: scrii, se salvează singur)
+    // Dar acum se și vede: la scris lung, „s-a salvat?" e întrebarea care te scoate din text.
+    let semnSalvare=null;
+    function aratoStareSalvare(text, culoare){
+      if(!semnSalvare) return;
+      semnSalvare.textContent=text;
+      semnSalvare.style.color=culoare||'inherit';
+      semnSalvare.style.opacity=text?'.75':'0';
+    }
     function programeazaSalvare(){
       clearTimeout(salvTimer);
-      salvTimer=setTimeout(async()=>{ try{ await Depozit.scrie(f); }catch(e){} },500);
+      aratoStareSalvare('…', prefViz.accent);
+      salvTimer=setTimeout(async()=>{
+        try{
+          await Depozit.scrie(f);
+          aratoStareSalvare('salvat', prefViz.accent);
+          setTimeout(()=>aratoStareSalvare('', ''), 1400);
+        }catch(e){
+          // dacă salvarea eșuează, trebuie să afli imediat, nu când e prea târziu
+          aratoStareSalvare('NESALVAT', '#f85149');
+        }
+      },500);
+    }
+    function numaraCuvinte(t){
+      const c=(t||'').trim();
+      if(!c) return '0 cuvinte';
+      const n=c.split(/\s+/).length;
+      return n+(n===1?' cuvânt':' cuvinte');
     }
     function randeazaCorp(){
-      const bg=tonHex(prefViz.bg, prefViz.lumina);
-      const txt=tonHex(prefViz.text, prefViz.lumina*0.3);
+      const bg=culoareViz(prefViz.bg, prefViz.lumina, prefViz.cald);
+      const txt=culoareViz(prefViz.text, prefViz.lumText, prefViz.cald);
       const ac=prefViz.accent;
       if(mod==='editare'){
         corpV.innerHTML='';
@@ -2612,11 +2658,26 @@ function deschideVizualizareSimpla(f, evidentiaza){
         ta.className='viz-scriere';
         ta.value=f.continut||'';
         ta.spellcheck=false;
-        ta.style.cssText='width:100%;min-height:100%;border:none;outline:none;resize:none;'+
+        ta.style.cssText='width:100%;min-height:calc(100% - 26px);border:none;outline:none;resize:none;'+
           'background:transparent;color:inherit;font:inherit;line-height:inherit;'+
-          'padding:0;display:block;caret-color:'+ac;
-        ta.addEventListener('input',()=>{ f.continut=ta.value; programeazaSalvare(); });
+          'padding:0;display:block;caret-color:'+prefViz.accent;
+        // rândul de jos: cât ai scris și dacă s-a salvat — discret, nu în drum
+        const josul=document.createElement('div');
+        josul.style.cssText='display:flex;justify-content:space-between;align-items:center;'+
+          'font-size:.72rem;opacity:.5;padding-top:8px;height:26px;box-sizing:border-box';
+        const cate=document.createElement('span');
+        cate.textContent=numaraCuvinte(ta.value);
+        semnSalvare=document.createElement('span');
+        semnSalvare.style.cssText='transition:opacity .3s;opacity:0;font-size:.72rem';
+        josul.appendChild(cate); josul.appendChild(semnSalvare);
+
+        ta.addEventListener('input',()=>{
+          f.continut=ta.value;
+          cate.textContent=numaraCuvinte(ta.value);
+          programeazaSalvare();
+        });
         corpV.appendChild(ta);
+        corpV.appendChild(josul);
         setTimeout(()=>ta.focus(),150);
       } else if(eMd){
         corpV.innerHTML='<div class="vd">'+md2htmlLocal(f.continut||'')+'</div>';
@@ -2757,8 +2818,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
     }
     function aplica(){
-      const bg=tonHex(prefViz.bg, prefViz.lumina);
-      const txt=tonHex(prefViz.text, prefViz.lumina*0.3);
+      const bg=culoareViz(prefViz.bg, prefViz.lumina, prefViz.cald);
+      const txt=culoareViz(prefViz.text, prefViz.lumText, prefViz.cald);
       const ac=prefViz.accent;
       root.style.background=bg; root.style.color=txt;
       root.querySelector('.viz-bara').style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid '+ac+'33;background:'+bg+';flex-shrink:0';
@@ -2766,6 +2827,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
       root.querySelectorAll('.viz-aspect,.viz-mic,.viz-mare').forEach(x=>{x.style.cssText='cursor:pointer;color:'+ac+';padding:6px 8px;font-size:1.1rem'});
       btnEdit.style.cssText='cursor:pointer;color:'+ac+';padding:7px 12px;font-size:1rem;border:1px solid '+ac+'55;border-radius:8px;font-weight:600';
       corpV.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px 16px 40px;width:100%;font-size:'+prefViz.font+'px;line-height:'+prefViz.lh+';background:'+bg+';color:'+txt+';';
+      // pe ecran lat, un rând prea lung obosește ochiul; îl putem strânge la mijloc
+      const lat=prefViz.lat||100;
+      corpV.style.maxWidth = lat>=100 ? 'none' : lat+'%';
+      corpV.style.marginLeft='auto'; corpV.style.marginRight='auto';
       randeazaCorp();
     }
     function salv(){ Memorie.salveaza({vizPref2:prefViz}); }
@@ -2785,19 +2850,44 @@ function deschideVizualizareSimpla(f, evidentiaza){
     faSw(root.querySelector('.viz-swInk'), PALETA_INK_VIZ, c=>prefViz.text=c);
     // cursoare
     const rLum=root.querySelector('.viz-lumina'), rF=root.querySelector('.viz-font'), rH=root.querySelector('.viz-lh');
+    const rTx=root.querySelector('.viz-lumText'), rC=root.querySelector('.viz-cald'), rL=root.querySelector('.viz-lat');
     function sinc(){
       rLum.value=prefViz.lumina; root.querySelector('.viz-luminaV').textContent=(prefViz.lumina>0?'+':'')+prefViz.lumina;
+      rTx.value=prefViz.lumText; root.querySelector('.viz-lumTextV').textContent=(prefViz.lumText>0?'+':'')+prefViz.lumText;
+      rC.value=prefViz.cald; root.querySelector('.viz-caldV').textContent=(prefViz.cald>0?'+':'')+prefViz.cald;
+      rL.value=prefViz.lat; root.querySelector('.viz-latV').textContent=prefViz.lat+'%';
       rF.value=prefViz.font; root.querySelector('.viz-fontV').textContent=prefViz.font+'px';
       rH.value=prefViz.lh; root.querySelector('.viz-lhV').textContent=(+prefViz.lh).toFixed(2);
     }
-    rLum.addEventListener('input',()=>{prefViz.lumina=+rLum.value;root.querySelector('.viz-luminaV').textContent=(prefViz.lumina>0?'+':'')+prefViz.lumina;aplica();salv();});
-    rF.addEventListener('input',()=>{prefViz.font=+rF.value;root.querySelector('.viz-fontV').textContent=prefViz.font+'px';aplica();salv();});
-    rH.addEventListener('input',()=>{prefViz.lh=+rH.value;root.querySelector('.viz-lhV').textContent=(+prefViz.lh).toFixed(2);aplica();salv();});
+    // fiecare cursor se vede pe loc, cât îl miști
+    function leaga(ctrl, camp, cheieV, formatare){
+      ctrl.addEventListener('input',()=>{
+        prefViz[camp]=+ctrl.value;
+        root.querySelector(cheieV).textContent=formatare(prefViz[camp]);
+        aplica(); salv();
+      });
+    }
+    const cuSemn=v=>(v>0?'+':'')+v;
+    leaga(rLum,'lumina','.viz-luminaV',cuSemn);
+    leaga(rTx,'lumText','.viz-lumTextV',cuSemn);
+    leaga(rC,'cald','.viz-caldV',cuSemn);
+    leaga(rL,'lat','.viz-latV',v=>v+'%');
+    leaga(rF,'font','.viz-fontV',v=>v+'px');
+    leaga(rH,'lh','.viz-lhV',v=>(+v).toFixed(2));
     root.querySelector('.viz-aspect').addEventListener('click',()=>{ panou.classList.toggle('deschis'); sinc(); });
     root.querySelector('.viz-panou-x').addEventListener('click',()=>panou.classList.remove('deschis'));
     root.querySelector('.viz-mare').addEventListener('click',()=>{ prefViz.font=Math.min(prefViz.font+1,30); aplica(); salv(); });
     root.querySelector('.viz-mic').addEventListener('click',()=>{ prefViz.font=Math.max(prefViz.font-1,12); aplica(); salv(); });
     aplica();
+    // La închidere, salvăm imediat ce n-a apucat să se scrie. Fără asta, dacă
+    // închideai fereastra în cele câteva zecimi dinaintea salvării automate,
+    // ultimele cuvinte se pierdeau — exact cuvintele la care tocmai lucrai.
+    return ()=>{
+      if(salvTimer){
+        clearTimeout(salvTimer);
+        Depozit.scrie(f).catch(e=>console.warn('Nu am putut salva la închidere:', e));
+      }
+    };
   },{},{appId:'viz:'+f.cale, iconita:'▢'});
 }
 
