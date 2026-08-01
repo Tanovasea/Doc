@@ -1176,7 +1176,18 @@ function randeazaComutator(){
   }
 }
 
+/* Panourile care acoperă conținutul (aspect, setări) nu trebuie să supraviețuiască
+   unei schimbări de fereastră. Le închidem într-un singur loc — la comutare —
+   în loc să ne bazăm că fiecare drum posibil își face curat după el: legături,
+   fire înapoi, rezultate de căutare, revenire la o fereastră deja deschisă.
+   Un singur loc de reținut, deci n-are cum să scape unul. */
+function inchidePanouriSuprapuse(){
+  document.querySelectorAll('.viz-panou.deschis, .term-setari.deschis')
+    .forEach(p=>p.classList.remove('deschis'));
+}
+
 function aratoFereastra(id){
+  inchidePanouriSuprapuse();
   document.body.classList.remove('acasa');
   const birou=document.body.classList.contains('birou');
   for(const f of ferestreDeschise){
