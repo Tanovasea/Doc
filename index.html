@@ -484,10 +484,12 @@
     position:absolute;left:0;right:0;bottom:0;z-index:15;
     background:var(--t-panou, #161b22);border-top:1px solid var(--linie-clar);
     padding:14px 16px calc(env(safe-area-inset-bottom,0) + 16px);
-    transform:translateY(110%);transition:transform .28s cubic-bezier(.2,.8,.2,1);
+    transform:translateY(110%);visibility:hidden;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1), visibility 0s .28s;
     max-height:75%;overflow-y:auto;
   }
-  .term-setari.deschis{transform:translateY(0)}
+  .term-setari.deschis{transform:translateY(0);visibility:visible;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1), visibility 0s}
   .ts-rand{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
   .ts-rand label{font-size:.78rem;color:var(--t-stins, #8b949e);font-weight:600}
   .ts-ctrl{display:flex;align-items:center;gap:12px}
@@ -505,10 +507,15 @@
     position:absolute;left:0;right:0;bottom:0;z-index:15;
     background:#161b22;border-top:1px solid #30363d;
     padding:14px 16px calc(env(safe-area-inset-bottom,0) + 16px);
-    transform:translateY(110%);transition:transform .28s cubic-bezier(.2,.8,.2,1);
+    /* Ascunderea NU se bazează doar pe transform: pe Android, când tastatura
+       urcă și coboară, înălțimea ferestrei se schimbă, iar un panou împins
+       „sub margine" poate rămâne la vedere. `visibility` nu are cum să alunece. */
+    transform:translateY(110%);visibility:hidden;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1), visibility 0s .28s;
     max-height:75%;overflow-y:auto;color:#c9d1d9;
   }
-  .viz-panou.deschis{transform:translateY(0)}
+  .viz-panou.deschis{transform:translateY(0);visibility:visible;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1), visibility 0s}
   .viz-panou .ts-rand{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
   .viz-panou label{font-size:.78rem;color:#8b949e;font-weight:600}
   .viz-panou .ts-ctrl{display:flex;align-items:center;gap:12px}
