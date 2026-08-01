@@ -1849,6 +1849,51 @@ const Cautare = (()=>{
     const e=harta.catre[sfarsit]!==undefined ? harta.catre[sfarsit] : harta.brut.length;
     return [s, e];
   }
+
+  // Singurul loc care caută potriviri într-un text. Îl folosesc și rezultatele,
+  // și evidențierea din vizualizator — dacă ar fi două căutări separate, ar putea
+  // ajunge să nu fie de acord între ele, exact cum s-a întâmplat deja o dată.
+  // Fiecare potrivire e VERIFICATĂ: decupăm din textul adevărat și ne uităm dacă,
+  // simplificat, chiar dă ce am căutat. Dacă nu, corectăm capetele. Așa marcajul
+  // nu mai poate cădea lângă cuvânt, oricât de ciudat ar fi scris textul.
+  function potriviriIn(brut, tipar, maxim=200){
+    const harta=simpluCuHarta(brut);
+    const re=new RegExp(tipar,'g');
+    const gasite=[]; let m;
+    while((m=re.exec(harta.simplu)) && gasite.length<maxim){
+      if(m[0].length===0){ re.lastIndex++; continue; }
+      const tinta=m[0];
+      let [s,e]=inapoi(harta, m.index, m.index+tinta.length);
+
+      // verificare + corecție: întindem sau strângem capătul până se potrivește
+      if(simplu(brut.slice(s,e))!==tinta){
+        let reparat=false;
+        for(let d=1; d<=4 && !reparat; d++){
+          for(const [s2,e2] of [[s,e+d],[s,e-d],[s-d,e],[s-d,e+d]]){
+            if(s2<0 || e2>brut.length || e2<=s2) continue;
+            if(simplu(brut.slice(s2,e2))===tinta){ s=s2; e=e2; reparat=true; break; }
+          }
+        }
+        if(!reparat) continue;    // mai bine nicio evidențiere decât una greșită
+      }
+      gasite.push([s,e]);
+    }
+    return gasite;
+  }
+
+  // construiește tiparul pentru o interogare: cuvintele pot fi despărțite
+  // de orice (spații multiple, rânduri noi, semne de punctuație).
+  // Aici păstrăm ȘI cuvintele de o literă. Indexul nu le ține (ar umfla harta
+  // fără folos), dar în frază contează: fără „i", tiparul pentru
+  // „promis ca-i platesc" nu mai putea acoperi „-i " și nu găsea nimic.
+  function bucatiTipar(interogare){
+    return simplu(interogare).split(/[^a-z0-9]+/).filter(Boolean);
+  }
+  function tiparPentru(interogare){
+    const parti=bucatiTipar(interogare);
+    if(!parti.length) return null;
+    return parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
+  }
   function cuvinte(text){
     return simplu(text).split(/[^a-z0-9]+/).filter(c=>c.length>=MIN);
   }
@@ -1889,10 +1934,17 @@ const Cautare = (()=>{
     if(!gata) await construieste();
     const q=(interogare||'').trim();
     if(!q) return [];
+    // Indexul ține doar cuvintele de cel puțin două litere, așa că îngustăm
+    // după ele. Dacă interogarea e formată numai din cuvinte de o literă
+    // („n-a", „o zi"), indexul nu ne ajută — trecem prin tot depozitul.
     const parti=cuvinte(q);
-    if(!parti.length) return [];
-
     let candidati=null;
+    if(!parti.length){
+      if(!tiparPentru(q)) return [];
+      candidati=new Set((await Depozit.toate())
+        .filter(f=>f.tip!=='folder' && !f.ascuns && !/^__/.test(f.cale))
+        .map(f=>f.cale));
+    }
     for(const c of parti){
       // prefix: „scri" găsește „scriu", „scrisoare" — util când nu ții minte forma exactă
       let potriviri=index.get(c);
@@ -1906,34 +1958,16 @@ const Cautare = (()=>{
     }
 
     const qSimplu=simplu(q);
-    const eFraza=parti.length>1;
     const rezultate=[];
+    // un singur cuvânt sau o frază: același tipar, aceeași cale de cod
+    const tipar=tiparPentru(q);
+    if(!tipar) return [];
+
     for(const cale of candidati){
       const f=await Depozit.gaseste(cale);
       if(!f || typeof f.continut!=='string') continue;
-      const harta=simpluCuHarta(f.continut);
-      const corpSimplu=harta.simplu;
-      const potriviriAici=[];
-
-      if(eFraza){
-        // fraza exactă, dar tolerantă la spații multiple și la rânduri noi
-        const tipar=parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
-        const re=new RegExp(tipar,'g');
-        let m;
-        while((m=re.exec(corpSimplu)) && potriviriAici.length<50){
-          const [s,e]=inapoi(harta, m.index, m.index+m[0].length);
-          potriviriAici.push({poz:s, lung:e-s});
-        }
-      } else {
-        let de=0;
-        while(potriviriAici.length<50){
-          const i=corpSimplu.indexOf(qSimplu, de);
-          if(i<0) break;
-          const [s,e]=inapoi(harta, i, i+qSimplu.length);
-          potriviriAici.push({poz:s, lung:e-s});
-          de=i+qSimplu.length;
-        }
-      }
+      const potriviriAici=potriviriIn(f.continut, tipar, 50)
+                            .map(([s,e])=>({poz:s, lung:e-s}));
 
       const inNume=simplu(f.cale).includes(qSimplu);
       if(!potriviriAici.length && !inNume) continue;
@@ -1967,7 +2001,8 @@ const Cautare = (()=>{
     };
   }
 
-  return {construieste, cauta, actualizeaza, uita, esteGata, statistici, simplu, simpluCuHarta, inapoi, fragmentDin};
+  return {construieste, cauta, actualizeaza, uita, esteGata, statistici, simplu,
+          simpluCuHarta, inapoi, potriviriIn, tiparPentru, fragmentDin};
 })();
 
 /* ---------- FEREASTRĂ CĂTRE APLICAȚIILE INTERNE ----------
@@ -2475,11 +2510,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
     // ---- EVIDENȚIERE: colorăm ce s-a căutat și sărim la prima apariție ----
     // Umblăm doar prin nodurile de text, ca să nu stricăm marcajul deja construit.
     function marcheazaGasitele(){
-      const q=Cautare.simplu(evidentiaza||'');
-      if(!q) return;
-      const parti=q.split(/[^a-z0-9]+/).filter(Boolean);
-      if(!parti.length) return;
-      const tipar=parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
+      const tipar=Cautare.tiparPentru(evidentiaza||'');
+      if(!tipar) return;
 
       const plimbare=document.createTreeWalker(corpV, NodeFilter.SHOW_TEXT);
       const noduri=[]; let n;
@@ -2488,19 +2520,15 @@ function deschideVizualizareSimpla(f, evidentiaza){
       let primul=null;
       for(const nod of noduri){
         const brut=nod.nodeValue;
-        const harta=Cautare.simpluCuHarta(brut);
-        const re=new RegExp(tipar,'g');
-        const locuri=[]; let m;
-        while((m=re.exec(harta.simplu))){
-          // traducem înapoi în textul adevărat: simplificarea poate scurta textul
-          // (diacritice descompuse), iar fără traducere marcajul cade lângă cuvânt
-          locuri.push(Cautare.inapoi(harta, m.index, m.index+m[0].length));
-        }
+        // aceeași funcție care a produs rezultatele căutării, deci marcajul
+        // nu poate fi de altă părere decât lista de rezultate
+        const locuri=Cautare.potriviriIn(brut, tipar, 100);
         if(!locuri.length) continue;
 
         const bucata=document.createDocumentFragment();
         let de=0;
         for(const [s,e] of locuri){
+          if(s<de) continue;                       // potriviri suprapuse: o luăm pe prima
           if(s>de) bucata.appendChild(document.createTextNode(brut.slice(de,s)));
           const marcaj=document.createElement('mark');
           marcaj.textContent=brut.slice(s,e);
