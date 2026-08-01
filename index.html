@@ -1011,7 +1011,11 @@ const Depozit = (()=>{
         try{
           const deSalvat=(f && typeof f.continut==='string') ? {...f, continut:await Cripto.encripteaza(f.continut)} : f;
           const r=tx('readwrite').put(deSalvat);
-          r.onsuccess=()=>rez(f); r.onerror=()=>resp(r.error);
+          // ținem indexul la zi aici, în inima scrierii: dacă l-am actualiza
+          // din fiecare loc care salvează, sigur am uita unul, iar căutarea
+          // ar rămâne în urmă fără niciun semn.
+          r.onsuccess=()=>{ try{ Cautare.actualizeaza(f); }catch(e){} rez(f); };
+          r.onerror=()=>resp(r.error);
         }catch(e){ resp(e); }
       })();
     });
@@ -1029,7 +1033,7 @@ const Depozit = (()=>{
       r.onerror=()=>rez(null);
     });
   }
-  function sterge(cale){return new Promise((rez)=>{const r=tx('readwrite').delete(cale);r.onsuccess=()=>rez(true);r.onerror=()=>rez(false);});}
+  function sterge(cale){return new Promise((rez)=>{const r=tx('readwrite').delete(cale);r.onsuccess=()=>{ try{ Cautare.uita(cale); }catch(e){} rez(true);};r.onerror=()=>rez(false);});}
   function toate(){
     return new Promise((rez)=>{
       const r=tx('readonly').getAll();
@@ -1808,6 +1812,136 @@ const Proprietate = (()=>{
   return {cine, revendica, elibereaza, arePermisiune, permite, harta, granturi};
 })();
 
+/* ---------- CĂUTARE: index invers ----------
+   Înainte, fiecare căutare decripta tot depozitul. Acum ținem o hartă
+   cuvânt → fișiere, construită o dată și actualizată la fiecare scriere.
+   Indexul stă în memorie cât ține sesiunea; nu ajunge pe disc, deci nu
+   are cum să scurgă conținut și nu poate rămâne nesincronizat cu depozitul. */
+const Cautare = (()=>{
+  let index=new Map();          // cuvânt -> Set de căi
+  let gata=false;
+  const MIN=2;                  // cuvintele de o literă nu ajută la nimic
+
+  // fără diacritice și fără majuscule: „Ștefan" se găsește scriind „stefan"
+  function simplu(s){
+    return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  }
+  function cuvinte(text){
+    return simplu(text).split(/[^a-z0-9]+/).filter(c=>c.length>=MIN);
+  }
+
+  function scoate(cale){
+    for(const set of index.values()) set.delete(cale);
+  }
+  function adauga(f){
+    if(!f || f.tip==='folder' || typeof f.continut!=='string') return;
+    if(f.ascuns || /^__/.test(f.cale)) return;              // fișierele de sistem nu se caută
+    if(typeof f.continut==='string' && f.continut.startsWith('⚠')) return;
+    const toate=new Set(cuvinte(f.cale).concat(cuvinte(f.continut)));
+    for(const c of toate){
+      if(!index.has(c)) index.set(c, new Set());
+      index.get(c).add(f.cale);
+    }
+  }
+  function actualizeaza(f){
+    if(!gata) return;
+    scoate(f.cale);
+    adauga(f);
+  }
+  function uita(cale){ if(gata) scoate(cale); }
+
+  async function construieste(){
+    index=new Map();
+    const toate=await Depozit.toate();
+    for(const f of toate) adauga(f);
+    gata=true;
+    return {fisiere:toate.length, cuvinte:index.size};
+  }
+  function esteGata(){ return gata; }
+  function statistici(){ return {cuvinte:index.size}; }
+
+  // Caută o frază: intersectăm listele cuvintelor (indexul îngustează rapid),
+  // apoi verificăm textul adevărat, fiindcă indexul nu știe ordinea cuvintelor.
+  async function cauta(interogare, limita=200){
+    if(!gata) await construieste();
+    const q=(interogare||'').trim();
+    if(!q) return [];
+    const parti=cuvinte(q);
+    if(!parti.length) return [];
+
+    let candidati=null;
+    for(const c of parti){
+      // prefix: „scri" găsește „scriu", „scrisoare" — util când nu ții minte forma exactă
+      let potriviri=index.get(c);
+      if(!potriviri){
+        potriviri=new Set();
+        for(const [cuv,set] of index) if(cuv.startsWith(c)) for(const cale of set) potriviri.add(cale);
+      }
+      candidati = candidati===null ? new Set(potriviri)
+                                   : new Set([...candidati].filter(x=>potriviri.has(x)));
+      if(!candidati.size) return [];
+    }
+
+    const qSimplu=simplu(q);
+    const eFraza=parti.length>1;
+    const rezultate=[];
+    for(const cale of candidati){
+      const f=await Depozit.gaseste(cale);
+      if(!f || typeof f.continut!=='string') continue;
+      const corpSimplu=simplu(f.continut);
+      const potriviriAici=[];
+
+      if(eFraza){
+        // fraza exactă, dar tolerantă la spații multiple și la rânduri noi
+        const tipar=parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
+        const re=new RegExp(tipar,'g');
+        let m;
+        while((m=re.exec(corpSimplu)) && potriviriAici.length<50) potriviriAici.push({poz:m.index, lung:m[0].length});
+      } else {
+        let de=0;
+        while(potriviriAici.length<50){
+          const i=corpSimplu.indexOf(qSimplu, de);
+          if(i<0) break;
+          potriviriAici.push({poz:i, lung:qSimplu.length});
+          de=i+qSimplu.length;
+        }
+      }
+
+      const inNume=simplu(f.cale).includes(qSimplu);
+      if(!potriviriAici.length && !inNume) continue;
+
+      rezultate.push({
+        cale:f.cale, tip:f.tip, inNume,
+        cateOri:potriviriAici.length,
+        potriviri:potriviriAici,
+        fragment: potriviriAici.length ? fragmentDin(f.continut, potriviriAici[0]) : '',
+        continut:f.continut
+      });
+      if(rezultate.length>=limita) break;
+    }
+
+    // întâi ce e în nume, apoi ce apare mai des
+    rezultate.sort((a,b)=> (b.inNume?1:0)-(a.inNume?1:0) || b.cateOri-a.cateOri);
+    return rezultate;
+  }
+
+  // decupăm în jurul potrivirii, fără să tăiem cuvintele la jumătate
+  function fragmentDin(text, potrivire){
+    const RAZA=60;
+    let s=Math.max(0, potrivire.poz-RAZA);
+    let e=Math.min(text.length, potrivire.poz+potrivire.lung+RAZA);
+    if(s>0){ const sp=text.indexOf(' ', s); if(sp>=0 && sp<potrivire.poz) s=sp+1; }
+    if(e<text.length){ const sp=text.lastIndexOf(' ', e); if(sp>potrivire.poz+potrivire.lung) e=sp; }
+    return {
+      inainte:(s>0?'…':'')+text.slice(s, potrivire.poz).replace(/\s+/g,' '),
+      potrivit:text.slice(potrivire.poz, potrivire.poz+potrivire.lung).replace(/\s+/g,' '),
+      dupa:text.slice(potrivire.poz+potrivire.lung, e).replace(/\s+/g,' ')+(e<text.length?'…':'')
+    };
+  }
+
+  return {construieste, cauta, actualizeaza, uita, esteGata, statistici, simplu, fragmentDin};
+})();
+
 /* ---------- FEREASTRĂ CĂTRE APLICAȚIILE INTERNE ----------
    Modulele de mai sus sunt declarate cu `const`, iar `const` la nivel de script
    NU devine proprietate a lui window. O aplicație internă (iframe, același
@@ -2196,7 +2330,7 @@ function ruleazaOaspete(numeApp, cod, fisierAsociat){
 /* ---------- ASOCIERI: ce oaspete deschide ce tip de fișier ----------
    Poți instala o aplicație .html și o desemnezi handler pentru o extensie
    prin terminal: `asociaza md AplicatiaMea.html`. Altfel, text simplu. */
-async function deschideCuApp(f){
+async function deschideCuApp(f, evidentiaza){
   // fișier cu parolă → cere-o (lacăt, nu seif — conținutul nu e criptat)
   if(f.parola){
     const p=prompt('Parola pentru '+f.cale+':');
@@ -2214,7 +2348,7 @@ async function deschideCuApp(f){
     if(app){ ruleazaOaspete(app.cale, app.continut, f); return; }
   }
   // rezervă: vizualizare text cu fundal reglabil (aceleași teme)
-  deschideVizualizareSimpla(f);
+  deschideVizualizareSimpla(f, evidentiaza);
 }
 
 // vizualizare text/markdown cu paletă completă (ca aplicația ta model)
@@ -2230,7 +2364,7 @@ function tonHex(hex, cant){
   const hx=v=>v.toString(16).padStart(2,'0');
   return '#'+hx(aj(r))+hx(aj(g))+hx(aj(b));
 }
-function deschideVizualizareSimpla(f){
+function deschideVizualizareSimpla(f, evidentiaza){
   const eMd=/\.(md|markdown)$/i.test(f.cale);
   deschideFereastra('▢ '+f.cale,(c)=>{
     incarcaPrefViz();
@@ -2306,6 +2440,54 @@ function deschideVizualizareSimpla(f){
         s.querySelectorAll('li').forEach(li=>{li.style.margin='.3em 0 .3em 1.2em'});
       } else {
         corpV.innerHTML='<pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+(f.continut||'(gol)').replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</pre>';
+      }
+      if(mod!=='editare' && evidentiaza) marcheazaGasitele();
+    }
+
+    // ---- EVIDENȚIERE: colorăm ce s-a căutat și sărim la prima apariție ----
+    // Umblăm doar prin nodurile de text, ca să nu stricăm marcajul deja construit.
+    function marcheazaGasitele(){
+      const q=Cautare.simplu(evidentiaza||'');
+      if(!q) return;
+      const parti=q.split(/[^a-z0-9]+/).filter(Boolean);
+      if(!parti.length) return;
+      const tipar=parti.map(p=>p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]+');
+
+      const plimbare=document.createTreeWalker(corpV, NodeFilter.SHOW_TEXT);
+      const noduri=[]; let n;
+      while((n=plimbare.nextNode())) noduri.push(n);
+
+      let primul=null;
+      for(const nod of noduri){
+        const brut=nod.nodeValue;
+        const simplu=Cautare.simplu(brut);
+        const re=new RegExp(tipar,'g');
+        const locuri=[]; let m;
+        while((m=re.exec(simplu))) locuri.push([m.index, m.index+m[0].length]);
+        if(!locuri.length) continue;
+
+        // simplu() păstrează lungimea (NFD scoate doar semnele diacritice
+        // combinate, iar noi le eliminăm), deci indicii se potrivesc peste text.
+        const bucata=document.createDocumentFragment();
+        let de=0;
+        for(const [s,e] of locuri){
+          if(s>de) bucata.appendChild(document.createTextNode(brut.slice(de,s)));
+          const marcaj=document.createElement('mark');
+          marcaj.textContent=brut.slice(s,e);
+          marcaj.style.cssText='background:'+prefViz.accent+'55;color:inherit;border-radius:3px;padding:0 2px';
+          bucata.appendChild(marcaj);
+          if(!primul) primul=marcaj;
+          de=e;
+        }
+        if(de<brut.length) bucata.appendChild(document.createTextNode(brut.slice(de)));
+        nod.parentNode.replaceChild(bucata, nod);
+      }
+      if(primul){
+        setTimeout(()=>{
+          primul.scrollIntoView({block:'center', behavior:'smooth'});
+          primul.style.background=prefViz.accent+'aa';
+          setTimeout(()=>{ primul.style.background=prefViz.accent+'55'; }, 1200);
+        }, 120);
       }
     }
     function aplica(){
@@ -2449,13 +2631,120 @@ Nucleu.inregistreaza({
   }
 });
 
+/* ===================== APLICAȚIA: CAUTĂ =====================
+   Un singur câmp peste tot depozitul. Fiecare potrivire arată contextul,
+   iar tap-ul deschide fișierul chiar la fraza găsită. */
+Nucleu.inregistreaza({
+  id:'cauta', nume:'Caută', iconita:'⌕',
+  montare(corp){
+    const root=document.createElement('div');
+    root.style.cssText='height:100%;display:flex;flex-direction:column;overflow:hidden';
+    root.innerHTML=`
+      <div class="ct-sus" style="flex:0 0 auto;padding:14px 14px 10px;border-bottom:1px solid var(--linie)">
+        <input class="ct-camp" type="search" placeholder="caută un cuvânt sau o frază…"
+          autocomplete="off" autocapitalize="off" spellcheck="false"
+          style="width:100%;background:var(--fundal-2);border:1px solid var(--linie);
+                 border-radius:10px;padding:12px 14px;color:var(--text);font-size:1rem;outline:none">
+        <div class="ct-stare" style="font-size:.76rem;color:var(--text-stins);margin-top:8px;min-height:1.1em"></div>
+      </div>
+      <div class="ct-jos" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 0 30px"></div>`;
+    corp.appendChild(root);
+
+    const camp=root.querySelector('.ct-camp');
+    const stare=root.querySelector('.ct-stare');
+    const lista=root.querySelector('.ct-jos');
+    let ultima='', temporizator=null;
+
+    (async()=>{
+      if(!Cautare.esteGata()){
+        stare.textContent='se pregătește indexul…';
+        const s=await Cautare.construieste();
+        stare.textContent=s.fisiere+' fișiere, '+s.cuvinte+' cuvinte distincte.';
+      } else {
+        stare.textContent=Cautare.statistici().cuvinte+' cuvinte în index.';
+      }
+    })();
+
+    function randeaza(rez, q){
+      lista.innerHTML='';
+      if(!rez.length){
+        const g=document.createElement('div');
+        g.style.cssText='padding:30px 18px;color:var(--text-stins);text-align:center;font-size:.9rem';
+        g.textContent='Nimic pentru „'+q+'".';
+        lista.appendChild(g);
+        return;
+      }
+      for(const r of rez){
+        const rand=document.createElement('div');
+        rand.style.cssText='padding:12px 16px;border-bottom:1px solid var(--linie);cursor:pointer';
+
+        const cap=document.createElement('div');
+        cap.style.cssText='display:flex;align-items:baseline;gap:8px;margin-bottom:5px';
+        const nume=document.createElement('span');
+        nume.textContent=r.cale;
+        nume.style.cssText='color:var(--accent);font-size:.92rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        cap.appendChild(nume);
+        if(r.cateOri>1){
+          const cnt=document.createElement('span');
+          cnt.textContent=r.cateOri+'×';
+          cnt.style.cssText='font-size:.72rem;color:var(--text-stins);flex-shrink:0';
+          cap.appendChild(cnt);
+        }
+        rand.appendChild(cap);
+
+        if(r.fragment){
+          const ctx=document.createElement('div');
+          ctx.style.cssText='font-size:.84rem;color:var(--text-stins);line-height:1.5';
+          ctx.appendChild(document.createTextNode(r.fragment.inainte));
+          const tare=document.createElement('span');
+          tare.textContent=r.fragment.potrivit;
+          tare.style.cssText='color:var(--text);background:var(--accent)33;border-radius:3px;padding:0 3px';
+          ctx.appendChild(tare);
+          ctx.appendChild(document.createTextNode(r.fragment.dupa));
+          rand.appendChild(ctx);
+        } else if(r.inNume){
+          const ctx=document.createElement('div');
+          ctx.style.cssText='font-size:.8rem;color:var(--text-stins)';
+          ctx.textContent='(găsit în nume)';
+          rand.appendChild(ctx);
+        }
+
+        rand.addEventListener('click', async()=>{
+          const f=await Depozit.gaseste(r.cale);
+          if(f) deschideCuApp(f, q);     // se deschide chiar la fraza căutată
+        });
+        lista.appendChild(rand);
+      }
+    }
+
+    async function executa(){
+      const q=camp.value.trim();
+      if(q===ultima) return;
+      ultima=q;
+      if(!q){ lista.innerHTML=''; stare.textContent=Cautare.statistici().cuvinte+' cuvinte în index.'; return; }
+      stare.textContent='caut…';
+      const t0=performance.now();
+      const rez=await Cautare.cauta(q);
+      const ms=Math.round(performance.now()-t0);
+      stare.textContent=rez.length ? (rez.length+' fișier(e) · '+ms+' ms') : ('nimic · '+ms+' ms');
+      randeaza(rez, q);
+    }
+
+    camp.addEventListener('input',()=>{ clearTimeout(temporizator); temporizator=setTimeout(executa, 180); });
+    camp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ clearTimeout(temporizator); executa(); camp.blur(); } });
+    setTimeout(()=>camp.focus(), 200);
+
+    return ()=>clearTimeout(temporizator);
+  }
+});
+
 /* ===================== APLICAȚIA: DOCUMENTE (internă) =====================
    DocCăutare nu mai e oaspete. Rulează în același origin ca Logos, fără
    sandbox, ca să aibă workeri (pdf.js, căutarea) și acces direct la Depozit.
    Documentele ei ajung astfel criptate cu parola master, ca tot restul.
    Fișierul doc-offline.html trebuie să stea lângă index.html. */
 Nucleu.inregistreaza({
-  id:'documente', nume:'Documente', iconita:'⌕',
+  id:'documente', nume:'Documente', iconita:'▦',
   montare(corp){
     // `src` relativ cere o origine adevărată (http/https). Din content:// sau
     // file:// nu se încarcă — spunem asta pe loc, în loc să lăsăm alb.
@@ -3017,6 +3306,7 @@ Nucleu.inregistreaza({
         randComanda('incarca','adu un backup de pe telefon înapoi');
         randComanda('import <fișier>','adu un backup salvat în depozit');
         randComanda('proprietari','ce aplicație ține ce fișier');
+        randComanda('index','reconstruiește indexul de căutare');
         randComanda('migrare','starea recriptării după schimbarea parolei');
         randComanda('elibereaza <nume>','scoate fișierul din grija unei aplicații');
         randComanda('recupereaza <nume>','adu înapoi versiunea de dinainte');
@@ -3080,19 +3370,23 @@ Nucleu.inregistreaza({
         scrie(v+'  →  '+p[1],'cald');
       },
       async cauta(arg){
-        const q=(arg||'').trim().toLowerCase();
-        if(!q){ scrie('Folosire:  cauta cuvânt','err'); return; }
-        const f=await Depozit.toate(); let gasit=0;
-        for(const x of f){
-          const c=(x.continut||'').toLowerCase();
-          if(x.cale.toLowerCase().includes(q) || c.includes(q)){
-            gasit++;
-            let unde=''; const i=c.indexOf(q);
-            if(i>=0){ const s=Math.max(0,i-15); unde='…'+(x.continut||'').slice(s,i+q.length+15).replace(/\n/g,' ')+'…'; }
-            scrieFisier(x, unde);
-          }
+        const q=(arg||'').trim();
+        if(!q){ scrie('Folosire:  cauta cuvânt sau frază','err'); return; }
+        if(!Cautare.esteGata()){ scrie('Se pregătește indexul...','stins'); await Cautare.construieste(); }
+        const rez=await Cautare.cauta(q);
+        if(!rez.length){ scrie('Nimic găsit.','stins'); return; }
+        for(const r of rez){
+          let unde='';
+          if(r.fragment) unde='…'+r.fragment.inainte.replace(/^…/,'')+'['+r.fragment.potrivit+']'+r.fragment.dupa;
+          else if(r.inNume) unde='(în nume)';
+          scrieFisier({cale:r.cale, tip:r.tip}, unde+(r.cateOri>1?('  ('+r.cateOri+'×)'):''));
         }
-        scrie(gasit?('Găsit în '+gasit+' fișier(e).'):'Nimic găsit.', gasit?'info':'stins');
+        scrie('Găsit în '+rez.length+' fișier(e).','info');
+      },
+      async index(){
+        scrie('Se reconstruiește indexul...','stins');
+        const s=await Cautare.construieste();
+        scrie('Index gata: '+s.fisiere+' fișiere, '+s.cuvinte+' cuvinte distincte.','cald');
       },
       async folder(arg){
         const nume=(arg||'').trim().split(/\s+/)[0];
