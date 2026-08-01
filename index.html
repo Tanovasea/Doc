@@ -515,7 +515,7 @@
   .viz-panou input[type=range]{flex:1;accent-color:#58a6ff;height:26px}
   .viz-panou .ts-val{font-size:.78rem;color:#8b949e;min-width:3.4em;text-align:right;font-family:var(--mono)}
   .ed-sw2{display:flex;gap:8px;flex-wrap:wrap}
-  .pic2{width:30px;height:30px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,255,255,.2)}
+  .pic2{width:26px;height:26px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,.2)}
   .pic2:active{transform:scale(.9)}
 
   @media (prefers-reduced-motion: reduce){*{transition-duration:.05s!important}}
@@ -1202,7 +1202,14 @@ function deschideFereastra(nume, montare, ctx, meta={}){
   const appId=meta.appId||nume;
   // dacă aplicația e deja deschisă, doar comută la ea
   const exist=ferestreDeschise.find(f=>f.appId===appId);
-  if(exist){ aratoFereastra(exist.id); return; }
+  if(exist){
+    // fereastra există deja: o anunțăm că se revine la ea, cu noul context.
+    // Fără asta, o revenire (dintr-o legătură, dintr-un rezultat de căutare)
+    // arăta fereastra exact cum o lăsaseși — cu panouri deschise și fără
+    // evidențierea cerută acum.
+    if(exist.laReafisare){ try{ exist.laReafisare(ctx||{}); }catch(e){ console.warn(e); } }
+    aratoFereastra(exist.id); return;
+  }
 
   const id='f'+Date.now()+Math.random().toString(36).slice(2,6);
   const el=document.createElement('div');
@@ -1218,7 +1225,8 @@ function deschideFereastra(nume, montare, ctx, meta={}){
   const corp=el.querySelector('.corp-fereastra');
 
   const curatenie = montare(corp, ctx||{}) || null;
-  const intrare={id, appId, nume, iconita:meta.iconita, ctx, el, corp, curatenie};
+  const intrare={id, appId, nume, iconita:meta.iconita, ctx, el, corp, curatenie,
+                 laReafisare:meta.laReafisare||null};
   ferestreDeschise.push(intrare);
   // fereastră nouă în mod birou → împarte spațiul din nou, egal
   if(document.body.classList.contains('birou')) reseteazaLatimi();
@@ -2542,8 +2550,14 @@ async function deschideCuApp(f, evidentiaza){
 }
 
 // vizualizare text/markdown cu paletă completă (ca aplicația ta model)
-const PALETA_BG_VIZ=['#0d1117','#16302b','#1e2530','#2a2620','#3a3326','#c9bfad','#e9dfc9','#f3efe6','#ffffff'];
-const PALETA_INK_VIZ=['#c9d1d9','#dfeae3','#e3d3bd','#58a6ff','#d9a441','#9a6a2f','#3a3326','#2a2620','#000000'];
+// Paletele sunt un punct de plecare rapid; pentru orice altceva, panoul are
+// și alegere liberă de culoare. Ordinea merge de la noapte la hârtie.
+const PALETA_BG_VIZ=['#000000','#0d1117','#111418','#1a1410','#16302b','#1e2530','#241c2e','#2a2620',
+                     '#3a3326','#4a4038','#5c5346','#8b8378','#c9bfad','#dcd3c0','#e9dfc9','#f1e9db',
+                     '#f3efe6','#f7f3ea','#fdfaf3','#ffffff'];
+const PALETA_INK_VIZ=['#ffffff','#f0f6fc','#c9d1d9','#dfeae3','#e3d3bd','#d9c9a3','#58a6ff','#7ee787',
+                      '#d9a441','#e0777d','#b58acc','#9a6a2f','#6b5b45','#4a4238','#3a3326','#2a2620',
+                      '#1c1c1c','#000000'];
 // preferințe de citire, ținute în memoria sistemului
 let prefViz = { bg:'#0d1117', text:'#c9d1d9', accent:'#58a6ff', font:18, lh:1.7,
                 lumina:0, lumText:0, cald:0, lat:100 };
@@ -2575,6 +2589,7 @@ function tonHex(hex, cant){
 }
 function deschideVizualizareSimpla(f, evidentiaza){
   const eMd=/\.(md|markdown)$/i.test(f.cale);
+  let laReafisare=null;
   deschideFereastra('▢ '+f.cale,(c)=>{
     incarcaPrefViz();
     const root=document.createElement('div');
@@ -2589,14 +2604,16 @@ function deschideVizualizareSimpla(f, evidentiaza){
       </div>
       <div class="viz-corp"></div>
       <div class="viz-panou">
-        <div class="ts-rand"><label>Fundal</label><div class="viz-swBg ed-sw2"></div></div>
+        <div class="ts-rand"><label>Fundal</label><div class="viz-swBg ed-sw2"></div>
+          <div class="ts-ctrl"><input type="color" class="viz-bgLiber" style="width:46px;height:32px;border:none;background:none;padding:0"><span class="ts-val" style="flex:1;text-align:left">orice culoare</span></div></div>
         <div class="ts-rand"><label>Fondul (închide ← → deschide)</label><div class="ts-ctrl"><input type="range" class="viz-lumina" min="-50" max="50" step="1"><span class="ts-val viz-luminaV"></span></div></div>
-        <div class="ts-rand"><label>Culoare text</label><div class="viz-swInk ed-sw2"></div></div>
+        <div class="ts-rand"><label>Culoare text</label><div class="viz-swInk ed-sw2"></div>
+          <div class="ts-ctrl"><input type="color" class="viz-inkLiber" style="width:46px;height:32px;border:none;background:none;padding:0"><span class="ts-val" style="flex:1;text-align:left">orice culoare</span></div></div>
         <div class="ts-rand"><label>Textul (stins ← → aprins)</label><div class="ts-ctrl"><input type="range" class="viz-lumText" min="-50" max="50" step="1"><span class="ts-val viz-lumTextV"></span></div></div>
         <div class="ts-rand"><label>Căldura (rece ← → caldă)</label><div class="ts-ctrl"><input type="range" class="viz-cald" min="-30" max="30" step="1"><span class="ts-val viz-caldV"></span></div></div>
         <div class="ts-rand"><label>Mărime font</label><div class="ts-ctrl"><input type="range" class="viz-font" min="13" max="30" step="1"><span class="ts-val viz-fontV"></span></div></div>
         <div class="ts-rand"><label>Spațiere rânduri</label><div class="ts-ctrl"><input type="range" class="viz-lh" min="1.1" max="2.3" step="0.05"><span class="ts-val viz-lhV"></span></div></div>
-        <div class="ts-rand"><label>Lățimea textului</label><div class="ts-ctrl"><input type="range" class="viz-lat" min="30" max="100" step="5"><span class="ts-val viz-latV"></span></div></div>
+        <div class="ts-rand"><label>Lățimea textului</label><div class="ts-ctrl"><input type="range" class="viz-lat" min="30" max="130" step="5"><span class="ts-val viz-latV"></span></div></div>
         <div class="term-setari-x viz-panou-x">gata</div>
       </div>`;
     c.appendChild(root);
@@ -2838,10 +2855,14 @@ function deschideVizualizareSimpla(f, evidentiaza){
       root.querySelectorAll('.viz-aspect,.viz-mic,.viz-mare').forEach(x=>{x.style.cssText='cursor:pointer;color:'+ac+';padding:6px 8px;font-size:1.1rem'});
       btnEdit.style.cssText='cursor:pointer;color:'+ac+';padding:7px 12px;font-size:1rem;border:1px solid '+ac+'55;border-radius:8px;font-weight:600';
       corpV.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px 16px 40px;width:100%;font-size:'+prefViz.font+'px;line-height:'+prefViz.lh+';background:'+bg+';color:'+txt+';';
-      // pe ecran lat, un rând prea lung obosește ochiul; îl putem strânge la mijloc
+      // pe ecran lat, un rând prea lung obosește ochiul; îl putem strânge la mijloc.
+      // Peste 100 mergem mai departe: subțiem marginile, până la muchia ecranului.
       const lat=prefViz.lat||100;
       corpV.style.maxWidth = lat>=100 ? 'none' : lat+'%';
       corpV.style.marginLeft='auto'; corpV.style.marginRight='auto';
+      const margine = lat>100 ? Math.max(0, Math.round(16-(lat-100)*0.5)) : 16;
+      corpV.style.paddingLeft=margine+'px';
+      corpV.style.paddingRight=margine+'px';
       // NU reconstruim conținutul aici. Înainte, aplica() chema randeazaCorp(),
       // iar la fiecare mișcare de cursor textarea se refăcea și primea focus —
       // de-acolo tastatura care sărea și locul pierdut din text.
@@ -2865,6 +2886,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
     }
     faSw(root.querySelector('.viz-swBg'), PALETA_BG_VIZ, c=>prefViz.bg=c);
     faSw(root.querySelector('.viz-swInk'), PALETA_INK_VIZ, c=>prefViz.text=c);
+    // alegere liberă: paleta e un punct de plecare, nu o limită
+    const bgLiber=root.querySelector('.viz-bgLiber'), inkLiber=root.querySelector('.viz-inkLiber');
+    bgLiber.addEventListener('input',()=>{ prefViz.bg=bgLiber.value; aplica(); salv(); });
+    inkLiber.addEventListener('input',()=>{ prefViz.text=inkLiber.value; aplica(); salv(); });
     // cursoare
     const rLum=root.querySelector('.viz-lumina'), rF=root.querySelector('.viz-font'), rH=root.querySelector('.viz-lh');
     const rTx=root.querySelector('.viz-lumText'), rC=root.querySelector('.viz-cald'), rL=root.querySelector('.viz-lat');
@@ -2875,6 +2900,9 @@ function deschideVizualizareSimpla(f, evidentiaza){
       rL.value=prefViz.lat; root.querySelector('.viz-latV').textContent=prefViz.lat+'%';
       rF.value=prefViz.font; root.querySelector('.viz-fontV').textContent=prefViz.font+'px';
       rH.value=prefViz.lh; root.querySelector('.viz-lhV').textContent=(+prefViz.lh).toFixed(2);
+      // selectoarele libere pornesc de la culoarea de acum, nu de la alb
+      const cur=c=>/^#[0-9a-fA-F]{6}$/.test(c)?c:'#000000';
+      bgLiber.value=cur(prefViz.bg); inkLiber.value=cur(prefViz.text);
     }
     // fiecare cursor se vede pe loc, cât îl miști
     function leaga(ctrl, camp, cheieV, formatare){
@@ -2902,6 +2930,17 @@ function deschideVizualizareSimpla(f, evidentiaza){
     root.querySelector('.viz-mic').addEventListener('click',()=>{ prefViz.font=Math.max(prefViz.font-1,12); aplica(); salv(); });
     aplica();
     randeazaCorp(false);   // conținutul se construiește o singură dată, fără să sară tastatura
+
+    // La revenire (dintr-o legătură sau dintr-un rezultat de căutare): închidem
+    // panoul de aspect, dacă rămăsese deschis, și evidențiem ce s-a cerut acum.
+    laReafisare=(nou)=>{
+      panou.classList.remove('deschis');
+      const cerut=nou && nou.evidentiaza;
+      if(cerut!==undefined && cerut!==evidentiaza){
+        evidentiaza=cerut;
+        randeazaCorp(false);
+      }
+    };
     // La închidere, salvăm imediat ce n-a apucat să se scrie. Fără asta, dacă
     // închideai fereastra în cele câteva zecimi dinaintea salvării automate,
     // ultimele cuvinte se pierdeau — exact cuvintele la care tocmai lucrai.
@@ -2911,7 +2950,8 @@ function deschideVizualizareSimpla(f, evidentiaza){
         Depozit.scrie(f).catch(e=>console.warn('Nu am putut salva la închidere:', e));
       }
     };
-  },{},{appId:'viz:'+f.cale, iconita:'▢'});
+  },{evidentiaza},{appId:'viz:'+f.cale, iconita:'▢',
+                   laReafisare:(nou)=>{ if(laReafisare) laReafisare(nou); }});
 }
 
 
