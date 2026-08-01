@@ -2648,7 +2648,24 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const n=c.split(/\s+/).length;
       return n+(n===1?' cuvânt':' cuvinte');
     }
-    function randeazaCorp(){
+    // Recolorează ce e deja pe ecran, FĂRĂ să reconstruiască textul.
+    // Asta e cheia: la mișcarea unui cursor nu se mai reface nimic, deci
+    // tastatura nu mai sare și nu-ți pierzi locul din text.
+    function coloreazaMd(){
+      const txt=culoareViz(prefViz.text, prefViz.lumText, prefViz.cald);
+      const ac=prefViz.accent;
+      const s=corpV.querySelector('.vd');
+      if(!s) return;
+      s.querySelectorAll('h1').forEach(h=>{h.style.color=txt;h.style.fontSize='1.6em';h.style.margin='.3em 0 .5em'});
+      s.querySelectorAll('h2').forEach(h=>{h.style.color=ac;h.style.fontSize='1.3em';h.style.margin='1em 0 .3em'});
+      s.querySelectorAll('p').forEach(p=>p.style.margin='0 0 .9em');
+      s.querySelectorAll('blockquote').forEach(b=>{b.style.borderLeft='2px solid '+ac;b.style.paddingLeft='14px';b.style.opacity='.85';b.style.fontStyle='italic';b.style.margin='0 0 .9em'});
+      s.querySelectorAll('code').forEach(cc=>{cc.style.background=ac+'22';cc.style.padding='.1em .4em';cc.style.borderRadius='4px'});
+      s.querySelectorAll('strong').forEach(x=>x.style.color=txt);
+      s.querySelectorAll('li').forEach(li=>{li.style.margin='.3em 0 .3em 1.2em'});
+    }
+
+    function randeazaCorp(cuFocus){
       const bg=culoareViz(prefViz.bg, prefViz.lumina, prefViz.cald);
       const txt=culoareViz(prefViz.text, prefViz.lumText, prefViz.cald);
       const ac=prefViz.accent;
@@ -2678,17 +2695,11 @@ function deschideVizualizareSimpla(f, evidentiaza){
         });
         corpV.appendChild(ta);
         corpV.appendChild(josul);
-        setTimeout(()=>ta.focus(),150);
+        // tastatura urcă doar când tu ceri să scrii, nu la fiecare redesenare
+        if(cuFocus) setTimeout(()=>ta.focus(),150);
       } else if(eMd){
         corpV.innerHTML='<div class="vd">'+md2htmlLocal(f.continut||'')+'</div>';
-        const s=corpV.querySelector('.vd');
-        s.querySelectorAll('h1').forEach(h=>{h.style.color=txt;h.style.fontSize='1.6em';h.style.margin='.3em 0 .5em'});
-        s.querySelectorAll('h2').forEach(h=>{h.style.color=ac;h.style.fontSize='1.3em';h.style.margin='1em 0 .3em'});
-        s.querySelectorAll('p').forEach(p=>p.style.margin='0 0 .9em');
-        s.querySelectorAll('blockquote').forEach(b=>{b.style.borderLeft='2px solid '+ac;b.style.paddingLeft='14px';b.style.opacity='.85';b.style.fontStyle='italic';b.style.margin='0 0 .9em'});
-        s.querySelectorAll('code').forEach(cc=>{cc.style.background=ac+'22';cc.style.padding='.1em .4em';cc.style.borderRadius='4px'});
-        s.querySelectorAll('strong').forEach(x=>x.style.color=txt);
-        s.querySelectorAll('li').forEach(li=>{li.style.margin='.3em 0 .3em 1.2em'});
+        coloreazaMd();
       } else {
         corpV.innerHTML='<pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+(f.continut||'(gol)').replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</pre>';
       }
@@ -2831,7 +2842,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const lat=prefViz.lat||100;
       corpV.style.maxWidth = lat>=100 ? 'none' : lat+'%';
       corpV.style.marginLeft='auto'; corpV.style.marginRight='auto';
-      randeazaCorp();
+      // NU reconstruim conținutul aici. Înainte, aplica() chema randeazaCorp(),
+      // iar la fiecare mișcare de cursor textarea se refăcea și primea focus —
+      // de-acolo tastatura care sărea și locul pierdut din text.
+      coloreazaMd();
     }
     function salv(){ Memorie.salveaza({vizPref2:prefViz}); }
     // comutare citire ↔ editare
@@ -2839,12 +2853,15 @@ function deschideVizualizareSimpla(f, evidentiaza){
       mod = mod==='editare' ? 'citire' : 'editare';
       btnEdit.textContent = mod==='editare' ? '✓ citește' : '✎';
       btnEdit.title = mod==='editare' ? 'înapoi la citire' : 'editează';
+      panou.classList.remove('deschis');
       aplica();
+      randeazaCorp(mod==='editare');   // focus doar când TU ceri să scrii
     });
     // swatches
     function faSw(cont, culori, set){
       cont.innerHTML='';
-      culori.forEach(col=>{ const s=document.createElement('span'); s.className='pic2'; s.style.background=col; s.addEventListener('click',()=>{set(col);aplica();salv();}); cont.appendChild(s); });
+      culori.forEach(col=>{ const s=document.createElement('span'); s.className='pic2'; s.style.background=col;
+        s.addEventListener('click',()=>{set(col);aplica();salv();}); cont.appendChild(s); });
     }
     faSw(root.querySelector('.viz-swBg'), PALETA_BG_VIZ, c=>prefViz.bg=c);
     faSw(root.querySelector('.viz-swInk'), PALETA_INK_VIZ, c=>prefViz.text=c);
@@ -2874,11 +2891,17 @@ function deschideVizualizareSimpla(f, evidentiaza){
     leaga(rL,'lat','.viz-latV',v=>v+'%');
     leaga(rF,'font','.viz-fontV',v=>v+'px');
     leaga(rH,'lh','.viz-lhV',v=>(+v).toFixed(2));
-    root.querySelector('.viz-aspect').addEventListener('click',()=>{ panou.classList.toggle('deschis'); sinc(); });
+    root.querySelector('.viz-aspect').addEventListener('click',()=>{
+      // dacă scriai, coborâm tastatura: altfel acoperă chiar cursoarele
+      const ta=corpV.querySelector('.viz-scriere');
+      if(ta) ta.blur();
+      panou.classList.toggle('deschis'); sinc();
+    });
     root.querySelector('.viz-panou-x').addEventListener('click',()=>panou.classList.remove('deschis'));
     root.querySelector('.viz-mare').addEventListener('click',()=>{ prefViz.font=Math.min(prefViz.font+1,30); aplica(); salv(); });
     root.querySelector('.viz-mic').addEventListener('click',()=>{ prefViz.font=Math.max(prefViz.font-1,12); aplica(); salv(); });
     aplica();
+    randeazaCorp(false);   // conținutul se construiește o singură dată, fără să sară tastatura
     // La închidere, salvăm imediat ce n-a apucat să se scrie. Fără asta, dacă
     // închideai fereastra în cele câteva zecimi dinaintea salvării automate,
     // ultimele cuvinte se pierdeau — exact cuvintele la care tocmai lucrai.
