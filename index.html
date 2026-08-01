@@ -136,7 +136,10 @@
 
   /* ===== FERESTRELE (mai multe vii deodată) ===== */
   #ferestre{
-    position:absolute;inset:0;top:calc(env(safe-area-inset-top,0) + 46px);
+    /* `fixed`, ca bara de sus. Cu `absolute`, cele două se ancorau diferit:
+       când Android mută viewportul (tastatura), bara rămânea pe loc iar
+       ferestrele alunecau în sus — de acolo banda neagră de jos. */
+    position:fixed;inset:0;top:calc(env(safe-area-inset-top,0) + 46px);
     bottom:env(safe-area-inset-bottom,0);
     z-index:50;
     pointer-events:none;   /* stratul gol lasă atingerea la desktop */
@@ -2617,6 +2620,15 @@ function tonHex(hex, cant){
   const hx=v=>v.toString(16).padStart(2,'0');
   return '#'+hx(aj(r))+hx(aj(g))+hx(aj(b));
 }
+// e poziția asta deja înăuntrul unei legături [[...]]?
+// (verificare simplă și sigură: ne uităm după ultima deschidere înainte de ea)
+function inLegatura(text, poz){
+  const deschis=text.lastIndexOf('[[', poz);
+  if(deschis<0) return false;
+  const inchis=text.indexOf(']]', deschis);
+  return inchis>=0 && inchis>=poz;
+}
+
 function deschideVizualizareSimpla(f, evidentiaza){
   const eMd=/\.(md|markdown)$/i.test(f.cale);
   let laReafisare=null;
@@ -2753,7 +2765,9 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
       if(mod!=='editare'){
         faLegaturile();
-        araFireleInapoi();
+        // lista „Trimit aici" nu se mai adaugă în josul paginii: legăturile
+        // sunt acum în ambele sensuri chiar în text, deci era doar zgomot.
+        // Cine vrea harta întreagă o are în Terminal:  legaturi <nume>
         if(evidentiaza) marcheazaGasitele();
       }
     }
@@ -3048,18 +3062,19 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
       // ---- CELĂLALT CAPĂT ----
       // Legăm și cuvântul din fișierul-țintă înapoi spre acesta, ca amândouă
-      // să fie atingibile. Altfel un capăt era legătură, iar celălalt text simplu.
-      if(loc && tintaFis && typeof tintaFis.continut==='string'){
-        const tt=tintaFis.continut;
-        const undeE=tt.indexOf(loc);
-        const dejaLegat=/\[\[[^\]]*\]\]/.test(tt.slice(Math.max(0,undeE-80), undeE+loc.length+2)) &&
-                        tt.slice(Math.max(0,undeE-2), undeE).includes('[');
-        if(undeE>=0 && !dejaLegat){
-          const inapoi='[['+loc+'|'+f.cale+'#'+sel.text+']]';
-          tintaFis.continut = tt.slice(0,undeE)+inapoi+tt.slice(undeE+loc.length);
-          try{ await Depozit.scrie(tintaFis); }
-          catch(e){ console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e); }
-        }
+      // să fie atingibile. Altfel un capăt era legătură, celălalt text simplu.
+      if(loc && tintaFis){
+        try{
+          // recitim ținta chiar acum: copia din listă poate fi veche
+          const tf=await Depozit.gaseste(tintaFis.cale) || tintaFis;
+          const tt=tf.continut||'';
+          const undeE=tt.indexOf(loc);
+          if(undeE>=0 && !inLegatura(tt, undeE)){
+            const inapoi='[['+loc+'|'+f.cale+'#'+sel.text+']]';
+            tf.continut=tt.slice(0,undeE)+inapoi+tt.slice(undeE+loc.length);
+            await Depozit.scrie(tf);
+          }
+        }catch(e){ console.warn('Nu am putut lega înapoi în '+tintaFis.cale, e); }
       }
 
       selPastrata=null; btnLeaga.style.opacity='.25';
@@ -3177,13 +3192,19 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
     // La revenire (dintr-o legătură sau dintr-un rezultat de căutare): închidem
     // panoul de aspect, dacă rămăsese deschis, și evidențiem ce s-a cerut acum.
-    laReafisare=(nou)=>{
+    laReafisare=async(nou)=>{
       panou.classList.remove('deschis');
+      // Recitim fișierul de pe disc. Fereastra ține în memorie propria copie;
+      // dacă între timp s-a scris în el din altă parte (de pildă legătura
+      // inversă, scrisă din fișierul celălalt), copia noastră e veche — n-am
+      // vedea schimbarea, iar salvarea automată de aici ar șterge-o.
+      try{
+        const proaspat=await Depozit.gaseste(f.cale);
+        if(proaspat && typeof proaspat.continut==='string') f.continut=proaspat.continut;
+      }catch(e){ console.warn('Nu am putut reciti '+f.cale, e); }
       const cerut=nou && nou.evidentiaza;
-      if(cerut!==undefined && cerut!==evidentiaza){
-        evidentiaza=cerut;
-        randeazaCorp(false);
-      }
+      if(cerut!==undefined) evidentiaza=cerut;
+      randeazaCorp(false);
     };
     // La închidere, salvăm imediat ce n-a apucat să se scrie. Fără asta, dacă
     // închideai fereastra în cele câteva zecimi dinaintea salvării automate,
