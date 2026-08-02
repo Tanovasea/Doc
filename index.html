@@ -2697,6 +2697,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
         <span class="viz-mare" title="mărește">A+</span>
       </div>
       <div class="viz-corp"></div>
+      <div class="viz-intrari"></div>
       <div class="viz-panou">
         <div class="ts-rand"><label>Fundal</label><div class="viz-swBg ed-sw2"></div>
           <div class="ts-ctrl"><input type="color" class="viz-bgLiber" style="width:46px;height:32px;border:none;background:none;padding:0"><span class="ts-val" style="flex:1;text-align:left">orice culoare</span></div></div>
@@ -2774,6 +2775,54 @@ function deschideVizualizareSimpla(f, evidentiaza){
       s.querySelectorAll('code').forEach(cc=>{cc.style.background=ac+'22';cc.style.padding='.1em .4em';cc.style.borderRadius='4px'});
       s.querySelectorAll('strong').forEach(x=>x.style.color=txt);
       s.querySelectorAll('li').forEach(li=>{li.style.margin='.3em 0 .3em 1.2em'});
+    }
+
+    /* ---------- CINE TRIMITE AICI ----------
+       Legăturile se scriu în text, deci le vezi pe cele care pleacă. Cele care
+       vin nu se vedeau nicăieri decât din terminal — iar ele sunt jumătatea
+       care face dintr-un teanc de însemnări o țesătură. Banda stă jos, strânsă
+       cât nu e nimic de arătat, și te duce înapoi exact la cuvântul din care
+       pleacă trimiterea, nu la începutul fișierului. */
+    async function randeazaIntrari(){
+      const banda=root.querySelector('.viz-intrari');
+      if(!banda) return;
+      banda.innerHTML='';
+      if(mod==='editare'){ banda.style.display='none'; return; }
+      let veniri=[];
+      try{
+        if(!Legaturi.esteGata()) await Legaturi.construieste();
+        veniri=Legaturi.intrari(f.cale)||[];
+      }catch(e){}
+      if(!veniri.length){ banda.style.display='none'; return; }
+      banda.style.display='';
+
+      const cap=document.createElement('div');
+      cap.style.cssText='font-size:.72rem;opacity:.5;text-transform:uppercase;letter-spacing:.07em;padding:9px 0 5px';
+      cap.textContent='⟵ trimit aici · '+veniri.length;
+      banda.appendChild(cap);
+
+      const sir=document.createElement('div');
+      sir.style.cssText='display:flex;flex-wrap:wrap;gap:7px;padding-bottom:10px';
+      for(const v of veniri){
+        // `trimitere` e ținta așa cum e scrisă în celălalt fișier: „Bunici#prispa”.
+        // Ancora de acolo e cuvântul DE AICI spre care s-a legat.
+        const parti=Legaturi.despicaTinta(String(v.trimitere||''));
+        const scurt=(v.cale||'').split('/').pop().replace(/\.(md|markdown|txt)$/i,'');
+        const p=document.createElement('span');
+        p.style.cssText='display:inline-flex;align-items:baseline;gap:5px;max-width:100%;'+
+          'padding:6px 11px;border:1px solid '+prefViz.accent+'44;border-radius:999px;'+
+          'font-size:.82rem;cursor:pointer;overflow:hidden';
+        p.innerHTML='<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(scurt)+'</span>'+
+                    (parti.loc?'<span style="opacity:.55;font-size:.9em;flex:none">› '+escHtml(parti.loc)+'</span>':'');
+        p.addEventListener('click', async ()=>{
+          const tf=await Depozit.gaseste(v.cale) || await Legaturi.rezolva(v.cale);
+          if(!tf){ instiintare('Nu mai găsesc „'+v.cale+'".'); return; }
+          // deschidem sursa și îi luminăm cuvântul din care pleacă trimiterea
+          deschideCuApp(tf, parti.eticheta || parti.loc || '');
+        });
+        sir.appendChild(p);
+      }
+      banda.appendChild(sir);
     }
 
     function randeazaCorp(cuFocus){
@@ -3031,6 +3080,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       }
 
       randeazaCorp(false);
+      randeazaIntrari();
       // spunem limpede ce s-a întâmplat: o ștergere pe jumătate, în tăcere,
       // ar lăsa o legătură care duce spre un cuvânt ce nu mai trimite înapoi
       if(siDincolo) instiintare('Legătură ștearsă din ambele fișiere.');
@@ -3142,6 +3192,9 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const margine = lat>100 ? Math.max(0, Math.round(16-(lat-100)*0.5)) : 16;
       corpV.style.paddingLeft=margine+'px';
       corpV.style.paddingRight=margine+'px';
+      const banda=root.querySelector('.viz-intrari');
+      if(banda) banda.style.cssText='flex-shrink:0;border-top:1px solid '+ac+'22;background:'+bg+
+        ';color:'+txt+';padding:0 14px;max-height:33%;overflow-y:auto;-webkit-overflow-scrolling:touch';
       // NU reconstruim conținutul aici. Înainte, aplica() chema randeazaCorp(),
       // iar la fiecare mișcare de cursor textarea se refăcea și primea focus —
       // de-acolo tastatura care sărea și locul pierdut din text.
@@ -3156,6 +3209,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       panou.classList.remove('deschis');
       aplica();
       randeazaCorp(mod==='editare');   // focus doar când TU ceri să scrii
+      randeazaIntrari();               // în scriere se strânge, la citire revine
     });
     // swatches
     function faSw(cont, culori, set){
@@ -3536,6 +3590,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       curataAles();
       randeazaCorp(false);
       // spunem pe față dacă a ieșit legătură în ambele sensuri sau doar într-unul
+      randeazaIntrari();
       if(ambele) instiintare('Legat în ambele fișiere.');
       else instiintare('Legat doar aici — '+(deCe||'fără capăt de întoarcere')+'.');
     }
@@ -3618,6 +3673,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       await Depozit.scrie(f);
       curataAles();
       randeazaCorp(false);
+      randeazaIntrari();
       instiintare('Legat aici, spre „'+loc+'".');
     }
 
@@ -3691,6 +3747,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
     aplica();
     randeazaCorp(false);   // conținutul se construiește o singură dată, fără să sară tastatura
+    randeazaIntrari();
 
     // La revenire (dintr-o legătură sau dintr-un rezultat de căutare): închidem
     // panoul de aspect, dacă rămăsese deschis, și evidențiem ce s-a cerut acum.
@@ -3707,6 +3764,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
       const cerut=nou && nou.evidentiaza;
       if(cerut!==undefined) evidentiaza=cerut;
       randeazaCorp(false);
+      randeazaIntrari();
     };
     // La închidere, salvăm imediat ce n-a apucat să se scrie. Fără asta, dacă
     // închideai fereastra în cele câteva zecimi dinaintea salvării automate,
@@ -3937,6 +3995,7 @@ Nucleu.inregistreaza({
     root.innerHTML=`
       <div class="util-file">
         <span class="uf activa" data-g="bani">Bani</span>
+        <span class="uf" data-g="legaturi">Legături</span>
         <span class="uf" data-g="doctor">Doctor</span>
       </div>
       <div class="util-corp"></div>`;
@@ -3987,6 +4046,10 @@ Nucleu.inregistreaza({
         corpU.innerHTML =
           camp('Cheltuială (sumă + categorie)','ex: 50 mâncare','Notează','cheltuit') +
           bilant;
+      }
+      else if(grup==='legaturi'){
+        corpU.innerHTML='<div class="u-gol">Se citesc legăturile...</div>';
+        corpU.innerHTML=''; await deseneazaLegaturi(corpU);
       }
       else if(grup==='doctor'){
         corpU.innerHTML='<div class="u-gol">Se verifică sistemul...</div>';
@@ -4475,6 +4538,226 @@ Nucleu.inregistreaza({
       const eliberat=(inainte!=null && dupa!=null)?Math.max(0, inainte-dupa):null;
       instiintare('Șters'+(eliberat?' · '+octFrumos(eliberat)+' eliberați':'')+'.');
       randeaza('doctor');
+    }
+
+    /* ---------- STAREA LEGĂTURILOR ----------
+       Legăturile stau scrise în text, deci se strică odată cu textul: ștergi
+       un fișier și rămân trimiteri spre nicăieri, rescrii un paragraf și o
+       ancoră rămâne fără cuvânt. Nimic nu te anunța.
+       Regula de aici e ca la Rămășițe: reparăm doar ce se poate dovedi. Ținta
+       ștearsă n-o dregem singuri — ori desfaci legătura, ori o îndrepți, și
+       amândouă sunt hotărâri de-ale tale. */
+    const laSimplu=a=>Cautare.simplu(a||'');
+
+    // apare cuvântul în text? și ca text liber, și ca etichetă de legătură —
+    // perechea unei legături înfășoară chiar cuvântul-ancoră, deci dacă am
+    // număra numai textul liber aș raporta moarte toate ancorele sănătoase
+    function ancoraExista(text, loc){
+      if(!loc) return true;
+      const t=laSimplu(text||''), c=laSimplu(loc);
+      return t.indexOf(c)>=0;
+    }
+
+    async function adunaLegaturi(){
+      const toate=(await Depozit.toate()).filter(f=>f.tip!=='folder' && typeof f.continut==='string');
+      const dupaCale={}; for(const f of toate) dupaCale[f.cale]=f;
+      const cheiExistente=new Map();
+      for(const f of toate) cheiExistente.set(Legaturi.cheie(f.cale), f);
+
+      const necazuri={tintaLipsa:[], etichetaGoala:[], ancoraMoarta:[], chioapa:[],
+                      ambigua:[], numeAmbiguu:[]};
+      let total=0;
+
+      // fișiere cu același nume de bază: o trimitere spre ele poate nimeri oriunde
+      const peNume={};
+      for(const f of toate){
+        const k=Legaturi.cheie(f.cale);
+        (peNume[k]=peNume[k]||[]).push(f.cale);
+      }
+      for(const k in peNume) if(peNume[k].length>1)
+        necazuri.numeAmbiguu.push({nume:k, cai:peNume[k]});
+
+      for(const f of toate){
+        const re=new RegExp(Legaturi.TIPAR.source,'g');
+        let m;
+        while((m=re.exec(f.continut))){
+          total++;
+          const brut=m[1];
+          const p=Legaturi.despicaTinta(brut.trim());
+          const unde={cale:f.cale, brut, parti:p};
+
+          if(!p.eticheta && !p.fisier && !p.loc) continue;
+          if(!p.eticheta && p.fisier && !p.loc) { /* [[Fișier]] simplu, e în regulă */ }
+
+          if(brut.indexOf('|')>=0 && !p.eticheta){ necazuri.etichetaGoala.push(unde); continue; }
+
+          // ținta: alt fișier, sau chiar acesta
+          const tinta = p.fisier ? cheiExistente.get(Legaturi.cheie(p.fisier)) : f;
+          if(p.fisier && !tinta){ necazuri.tintaLipsa.push(unde); continue; }
+
+          // La o legătură în același fișier, ancora s-ar găsi pe sine: [[#libelulă]]
+          // conține chiar cuvântul „libelulă". Scoatem legătura din text înainte
+          // de a căuta, altfel n-aș raporta niciodată o ancoră internă moartă.
+          let caut=tinta.continut||'';
+          if(Legaturi.cheie(tinta.cale)===Legaturi.cheie(f.cale))
+            caut=caut.slice(0,m.index)+caut.slice(m.index+m[0].length);
+
+          if(p.loc && !ancoraExista(caut, p.loc)){ necazuri.ancoraMoarta.push(unde); continue; }
+
+          if(p.loc && p.fisier){
+            // perechea: o legătură din țintă care trimite înapoi aici
+            const re2=new RegExp(Legaturi.TIPAR.source,'g');
+            let m2, gasit=false;
+            while((m2=re2.exec(tinta.continut))){
+              const q=Legaturi.despicaTinta(m2[1].trim());
+              if(!q.fisier || Legaturi.cheie(q.fisier)!==Legaturi.cheie(f.cale)) continue;
+              if(laSimplu(q.eticheta)===laSimplu(p.loc) || laSimplu(q.loc)===laSimplu(p.eticheta)){ gasit=true; break; }
+            }
+            if(!gasit){ necazuri.chioapa.push(unde); continue; }
+          }
+
+          // ancoră care apare de multe ori: săritura merge la prima
+          if(p.loc){
+            const t=laSimplu(caut), c=laSimplu(p.loc);
+            let n=0, i=0;
+            while((i=t.indexOf(c,i))>=0){ n++; i+=c.length; if(n>4) break; }
+            if(n>4) necazuri.ambigua.push({...unde, cate:n});
+          }
+        }
+      }
+      return {total, necazuri, dupaCale, cheiExistente};
+    }
+
+    // înlocuiește o singură legătură, exact acolo unde e scrisă
+    async function schimbaLegatura(cale, brutVechi, brutNou){
+      const f=await Depozit.gaseste(cale); if(!f) return false;
+      const vechi='[['+brutVechi+']]';
+      const poz=(f.continut||'').indexOf(vechi);
+      if(poz<0) return false;
+      f.continut=f.continut.slice(0,poz)+(brutNou===null?'':'[['+brutNou+']]')+f.continut.slice(poz+vechi.length);
+      await Depozit.scrie(f);
+      improspateazaFereastra(cale);
+      return true;
+    }
+
+    async function deseneazaLegaturi(gazda){
+      gazda.innerHTML='<div class="u-gol">Se citesc legăturile...</div>';
+      let r;
+      try{ r=await adunaLegaturi(); }
+      catch(e){ gazda.innerHTML='<div class="u-gol">Nu am putut citi legăturile.</div>'; return; }
+      const n=r.necazuri;
+      const cate=Object.keys(n).reduce((s,k)=>s+n[k].length,0);
+      gazda.innerHTML='';
+
+      const sus=document.createElement('div');
+      sus.className='u-rand';
+      sus.innerHTML='<label>Țesătura</label><div class="u-info" style="text-align:left;padding:10px 2px;line-height:1.9">'+
+        '<div>Legături scrise: <b style="font-size:1em">'+r.total+'</b></div>'+
+        '<div style="color:'+(cate?'var(--accent-cald, #d29922)':'var(--verde, #3fb950)')+'">'+
+        (cate?cate+' de lămurit':'✓ Toate duc unde spun.')+'</div></div>';
+      gazda.appendChild(sus);
+
+      function sectiune(titlu, lamurire, lista, faceBuloane){
+        if(!lista.length) return;
+        const d=document.createElement('div'); d.className='u-rand';
+        const et=document.createElement('label'); et.textContent=titlu+' · '+lista.length;
+        d.appendChild(et);
+        const nota=document.createElement('div'); nota.className='u-nota'; nota.textContent=lamurire;
+        d.appendChild(nota);
+        for(const x of lista){
+          const rand=document.createElement('div');
+          rand.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #21262d';
+          const st=document.createElement('div'); st.style.cssText='flex:1;min-width:0';
+          st.innerHTML='<div style="font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[['+
+                       escHtml(x.brut||'')+']]</div>'+
+                       '<div style="font-size:.76rem;color:var(--text-stins);margin-top:2px">în '+escHtml(x.cale||'')+'</div>';
+          rand.appendChild(st);
+          const b=faceBuloane?faceBuloane(x, rand):null;
+          if(b) rand.appendChild(b);
+          d.appendChild(rand);
+        }
+        gazda.appendChild(d);
+      }
+
+      function buton(text, culoare, fapta){
+        const b=document.createElement('button');
+        b.textContent=text;
+        b.style.cssText='background:transparent;border:1px solid '+culoare+';color:'+culoare+
+                        ';border-radius:8px;padding:7px 13px;font-size:.82rem;flex:none';
+        b.addEventListener('click', async ()=>{ b.disabled=true; b.textContent='…'; await fapta(); });
+        return b;
+      }
+      const dres=async(msj)=>{ instiintare(msj); await deseneazaLegaturi(gazda); };
+
+      sectiune('Etichetă goală',
+        'S-a scris fără cuvintele tale. Pastila arată ținta în locul lor. Se umple cu ancora.',
+        n.etichetaGoala, x=>buton('Umple', 'var(--verde, #3fb950)', async()=>{
+          const p=x.parti;
+          const nou=(p.loc||p.fisier)+'|'+p.fisier+(p.loc?'#'+p.loc:'');
+          await schimbaLegatura(x.cale, x.brut, nou);
+          await dres('Umplută cu „'+(p.loc||p.fisier)+'".');
+        }));
+
+      sectiune('Ancoră moartă',
+        'Cuvântul de după # nu mai există în fișierul-țintă. Legătura poate rămâne, dar spre fișier, nu spre cuvânt.',
+        n.ancoraMoarta, x=>buton('Taie ancora', 'var(--verde, #3fb950)', async()=>{
+          const p=x.parti;
+          const nou=(p.eticheta?p.eticheta+'|':'')+p.fisier;
+          await schimbaLegatura(x.cale, x.brut, nou);
+          await dres('Duce acum la fișier.');
+        }));
+
+      sectiune('Legături chioape',
+        'Un capăt fără pereche: de acolo vii, înapoi nu te întorci. Se scrie perechea lipsă, dacă ancora e liberă în țintă.',
+        n.chioapa, x=>buton('Leagă înapoi', 'var(--verde, #3fb950)', async()=>{
+          const p=x.parti;
+          const tinta=await Legaturi.rezolva(p.fisier);
+          if(!tinta){ await dres('Nu mai găsesc ținta.'); return; }
+          const tt=tinta.continut||'';
+          let de=0, poz=-1, q;
+          while((q=tt.indexOf(p.loc, de))>=0){ de=q+p.loc.length; if(!inLegatura(tt,q)){ poz=q; break; } }
+          if(poz<0){ await dres('„'+p.loc+'" e deja parte dintr-o legătură acolo — nu am unde s-o pun.'); return; }
+          tinta.continut=tt.slice(0,poz)+'[['+p.loc+'|'+x.cale+'#'+(p.eticheta||p.loc)+']]'+tt.slice(poz+p.loc.length);
+          await Depozit.scrie(tinta);
+          improspateazaFereastra(tinta.cale);
+          await dres('Legat în ambele sensuri.');
+        }));
+
+      sectiune('Ținta nu există',
+        'Trimit spre un fișier care nu mai e. Nu repar singur: ori desfaci legătura și rămâne textul, ori o îndrepți tu spre alt fișier.',
+        n.tintaLipsa, x=>buton('Desfă', 'var(--rosu, #f85149)', async()=>{
+          const p=x.parti;
+          const ramane=p.eticheta||p.loc||p.fisier;
+          const f=await Depozit.gaseste(x.cale);
+          if(f){
+            const vechi='[['+x.brut+']]';
+            const poz=(f.continut||'').indexOf(vechi);
+            if(poz>=0){
+              f.continut=f.continut.slice(0,poz)+ramane+f.continut.slice(poz+vechi.length);
+              await Depozit.scrie(f); improspateazaFereastra(x.cale);
+            }
+          }
+          await dres('Desfăcută. Textul a rămas.');
+        }));
+
+      sectiune('Ancoră care apare des',
+        'Cuvântul se găsește de multe ori în țintă, iar săritura merge la prima. Nu e stricat, doar imprecis: o ancoră mai lungă ar nimeri mai bine.',
+        n.ambigua, null);
+
+      if(n.numeAmbiguu.length){
+        const d=document.createElement('div'); d.className='u-rand';
+        d.innerHTML='<label>Nume care se calcă · '+n.numeAmbiguu.length+'</label>'+
+          '<div class="u-nota">Trimiterile se caută după numele scurt, fără folder și fără extensie. '+
+          'Fișierele astea au același nume scurt, deci o legătură spre ele poate nimeri în oricare.</div>';
+        for(const x of n.numeAmbiguu){
+          const rand=document.createElement('div');
+          rand.style.cssText='padding:9px 2px;border-bottom:1px solid #21262d;font-size:.84rem';
+          rand.innerHTML='<div>'+escHtml(x.nume)+'</div><div style="font-size:.76rem;color:var(--text-stins);margin-top:2px">'+
+                         escHtml(x.cai.join('  ·  '))+'</div>';
+          d.appendChild(rand);
+        }
+        gazda.appendChild(d);
+      }
     }
 
     function lega(){
