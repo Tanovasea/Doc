@@ -4257,6 +4257,33 @@ Nucleu.inregistreaza({
         }
       }catch(e){}
 
+      // 5. fișiere ascunse cu semn străin.
+      //    Versiunea asta scrie doar `__stare_logos` și `__ver1:…`. Orice alt
+      //    nume cu `__` a fost scris de altceva — cel mai probabil de o
+      //    aplicație cu acces deplin, care ajunge la depozit fără punte, deci
+      //    fără să lase însemnare de proprietate. `numeSigur()` le refuză
+      //    numele, așa că nu se pot atinge nici din Fișiere, nici din terminal:
+      //    dacă nu apar aici, nu apar nicăieri.
+      try{
+        const ALE_NOASTRE=['__stare_logos','__ver1'];
+        const brute2=await Depozit.bruteTot();
+        const peSemn={};
+        for(const f of brute2){
+          const cale=f.cale||'';
+          if(!cale.startsWith('__')) continue;
+          const semn=cale.split(':')[0].replace(/_[a-z]{1,2}$/,'');
+          if(ALE_NOASTRE.includes(semn) || ALE_NOASTRE.includes(cale)) continue;
+          let m=0; try{ m=new Blob([f.continut||'']).size; }catch(e){}
+          (peSemn[semn]=peSemn[semn]||{cai:[], octeti:0});
+          peSemn[semn].cai.push(cale); peSemn[semn].octeti+=m;
+        }
+        for(const semn in peSemn){
+          const g=peSemn[semn];
+          straine.push({fel:'fisiere', nume:semn+'…  ('+g.cai.length+' fișiere ascunse)', cai:g.cai,
+            detaliu:'semn pe care versiunea asta de Logos nu-l scrie · '+octFrumos(g.octeti)});
+        }
+      }catch(e){}
+
       deseneazaRamasite(gazda, deAruncat, folosite, straine);
     }
 
@@ -4299,13 +4326,13 @@ Nucleu.inregistreaza({
       if(straine.length){
         const desfa=document.createElement('div');
         desfa.style.cssText='padding:12px 2px;font-size:.82rem;color:var(--text-stins);cursor:pointer;text-decoration:underline;text-underline-offset:3px';
-        const eticheta=()=> straine.length+' bază/baze care nu sunt ale Logos-ului — arată-mi';
+        const eticheta=()=> straine.length+' lucru(ri) pe care Logos nu le-a scris — arată-mi';
         desfa.textContent=eticheta();
         const cutie=document.createElement('div');
         cutie.style.display='none';
         const avert=document.createElement('div');
         avert.className='u-nota';
-        avert.textContent='Browserul ține datele pe origine, nu pe aplicație: nu pot ști a cui e fiecare. Pot fi ale unei aplicații-oaspete pe care o folosești acum. Uită-te ce e înăuntru înainte de orice.';
+        avert.textContent='Browserul ține datele pe origine, nu pe aplicație. O aplicație cu acces deplin scrie în depozit fără punte, deci fără să lase însemnare: nu pot ști a cui e fiecare. Uită-te ce e înăuntru înainte de orice.';
         cutie.appendChild(avert);
         for(const g of straine) cutie.appendChild(rand(g,true));
         desfa.addEventListener('click',()=>{
