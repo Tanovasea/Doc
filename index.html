@@ -4122,100 +4122,168 @@ Nucleu.inregistreaza({
       });
     }
 
+    /* Ce știm despre origine.
+       „A lista tot ce nu e depozitul Logos" e o unealtă proastă: pune datele
+       tale la o apăsare de ștergere, fără să-ți spună ce sunt. Aplicațiile-
+       oaspete care rulau pe vremea când aveau origine adevărată puteau să-și
+       facă baze proprii aici; alea sunt ale tale, nu gunoi.
+       Așa că separăm: ce e sigur de aruncat, ce e în folosință, și ce nu
+       recunoaștem — ultimele două fără buton la vedere. */
+    const BAZE_ALE_NOASTRE={ 'logos_depozit':'depozitul Logos — fișierele tale' };
+    const GUNOI_STIUT={ 'doccautare3':'baza aplicației Documente, scoasă din Logos' };
+
     async function cautaRamasite(gazda){
       if(!gazda) return;
-      const gasite=[];
+      const deAruncat=[], folosite=[], nestiute=[];
 
-      // 1. alte baze de date în aceeași origine
+      // 1. baze de date din aceeași origine
       try{
         if(indexedDB.databases){
           for(const b of await indexedDB.databases()){
-            if(!b.name || b.name==='logos_depozit') continue;
+            if(!b.name) continue;
+            if(BAZE_ALE_NOASTRE[b.name]){
+              folosite.push({nume:b.name, detaliu:BAZE_ALE_NOASTRE[b.name]});
+              continue;
+            }
             const c=await cerceteazaBaza(b.name);
-            gasite.push({fel:'baza', nume:b.name,
-              detaliu: c ? (c.total+' înregistrări în: '+c.magazii.join(', ')) : 'nu am putut citi înăuntru'});
+            const cate=c?(c.total+' înregistrări în: '+c.magazii.join(', ')):'nu am putut citi înăuntru';
+            if(GUNOI_STIUT[b.name]) deAruncat.push({fel:'baza', nume:b.name, detaliu:GUNOI_STIUT[b.name]+' · '+cate});
+            else nestiute.push({fel:'baza', nume:b.name, detaliu:cate});
+          }
+        } else {
+          // Firefox nu dă lista. Cel puțin de gunoiul știut ne putem ocupa.
+          for(const n in GUNOI_STIUT){
+            const c=await cerceteazaBaza(n);
+            if(c && c.magazii.length)
+              deAruncat.push({fel:'baza', nume:n, detaliu:GUNOI_STIUT[n]+' · '+c.total+' înregistrări'});
           }
         }
       }catch(e){}
 
-      // 2. cămări rămase de la aplicații-oaspete care nu mai există
+      // 2. cămările aplicațiilor-oaspete
       try{
-        const toate=await Depozit.toate();
+        const toate=await Depozit.toateNefiltrate();   // și cele ascunse: să nu par orfan cine e viu
         const vii=new Set();
-        for(const f of toate) if(f.tip!=='folder'){
-          vii.add(f.cale); vii.add(f.cale.split('/').pop());
-        }
+        for(const f of toate) if(f.tip!=='folder'){ vii.add(f.cale); vii.add(f.cale.split('/').pop()); }
         for(let i=0;i<localStorage.length;i++){
           const k=localStorage.key(i);
           if(!k || k.indexOf('camara_oaspete_')!==0) continue;
           const numeApp=k.slice('camara_oaspete_'.length);
-          if(vii.has(numeApp)) continue;
-          gasite.push({fel:'camara', nume:k, aplicatie:numeApp,
-            detaliu:'cămara aplicației „'+numeApp+'", care nu mai e în depozit · '+
-                    octFrumos((localStorage.getItem(k)||'').length)});
+          const cat=octFrumos((localStorage.getItem(k)||'').length);
+          if(vii.has(numeApp)) folosite.push({nume:k, detaliu:'cămara aplicației „'+numeApp+'", care e în depozit · '+cat});
+          else deAruncat.push({fel:'camara', nume:k,
+                 detaliu:'cămara aplicației „'+numeApp+'", care nu mai există · '+cat});
         }
       }catch(e){}
 
-      // 3. cache-uri vechi (paznicul le curăță la activare; dacă a fost
-      //    întreruptă, rămân aici)
+      // 3. copii ale Logos-ului. Cea mai nouă e cea în folosință.
       try{
         if(window.caches){
           const nume=(await caches.keys()).sort();
-          for(const n of nume.slice(0,-1))
-            gasite.push({fel:'cache', nume:n, detaliu:'copie veche a aplicației Logos'});
+          nume.forEach((n,i)=>{
+            if(i===nume.length-1) folosite.push({nume:n, detaliu:'copia Logos care rulează acum'});
+            else deAruncat.push({fel:'cache', nume:n, detaliu:'copie veche a Logos-ului'});
+          });
         }
       }catch(e){}
 
-      deseneazaRamasite(gazda, gasite);
+      deseneazaRamasite(gazda, deAruncat, folosite, nestiute);
     }
 
-    function deseneazaRamasite(gazda, gasite){
+    function deseneazaRamasite(gazda, deAruncat, folosite, nestiute){
       gazda.innerHTML='';
-      if(!gasite.length){
-        gazda.innerHTML='<div class="u-info" style="text-align:left;padding:10px 2px">✓ Nimic de aruncat. Tot ce e pe telefon e folosit.</div>';
-        return;
-      }
-      const nota=document.createElement('div');
-      nota.className='u-nota';
-      nota.textContent='Date rămase de la aplicații scoase sau versiuni vechi. Nu sunt în depozitul Logos: nu se criptează și nu intră în export.';
-      gazda.appendChild(nota);
 
-      for(const g of gasite){
+      function rand(g, periculos){
         const r=document.createElement('div');
         r.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid #21262d';
         const stanga=document.createElement('div');
         stanga.style.cssText='flex:1;min-width:0';
         stanga.innerHTML='<div style="font-size:.9rem">'+escHtml(g.nume)+'</div>'+
                          '<div style="font-size:.78rem;color:var(--text-stins);margin-top:2px">'+escHtml(g.detaliu)+'</div>';
+        r.appendChild(stanga);
         const b=document.createElement('button');
         b.textContent='Șterge';
         b.style.cssText='background:transparent;border:1px solid var(--rosu, #f85149);color:var(--rosu, #f85149);border-radius:8px;padding:7px 14px;font-size:.84rem;flex:none';
-        b.addEventListener('click', async ()=>{
-          if(!confirm('Ștergi „'+g.nume+'"?\n\nNu se poate desface. Ce e înăuntru se pierde.')) return;
-          b.disabled=true; b.textContent='…';
-          const inainte=await spatiuFolosit();
-          let reusit=false;
-          if(g.fel==='baza')  reusit=await stergeBaza(g.nume);
-          if(g.fel==='camara'){ try{ localStorage.removeItem(g.nume); reusit=true; }catch(e){} }
-          if(g.fel==='cache'){ try{ reusit=await caches.delete(g.nume); }catch(e){} }
-          if(reusit==='blocat'){
-            b.disabled=false; b.textContent='Șterge';
-            instiintare('Baza e ținută deschisă de altă filă. Închide celelalte file cu Logos și încearcă din nou.');
-            return;
-          }
-          if(!reusit){
-            b.disabled=false; b.textContent='Șterge';
-            instiintare('N-am putut șterge „'+g.nume+'".');
-            return;
-          }
-          const dupa=await spatiuFolosit();
-          const eliberat=(inainte!=null && dupa!=null)?Math.max(0, inainte-dupa):null;
-          instiintare('Șters'+(eliberat?' · '+octFrumos(eliberat)+' eliberați':'')+'.');
-          randeaza('doctor');
-        });
-        r.appendChild(stanga); r.appendChild(b);
-        gazda.appendChild(r);
+        b.addEventListener('click',()=>aruncaUna(g, b, periculos));
+        r.appendChild(b);
+        return r;
       }
+
+      // ---- de aruncat ----
+      if(!deAruncat.length){
+        const g=document.createElement('div');
+        g.className='u-info'; g.style.cssText='text-align:left;padding:10px 2px';
+        g.textContent='✓ Nimic de aruncat.';
+        gazda.appendChild(g);
+      } else {
+        const n=document.createElement('div');
+        n.className='u-nota';
+        n.textContent='Rămase de la aplicații scoase sau versiuni vechi. Nimic din ce e în folosință nu apare aici.';
+        gazda.appendChild(n);
+        for(const g of deAruncat) gazda.appendChild(rand(g,false));
+      }
+
+      // ---- ce nu recunosc: la vedere doar dacă ceri ----
+      if(nestiute.length){
+        const desfa=document.createElement('div');
+        desfa.style.cssText='padding:12px 2px;font-size:.82rem;color:var(--accent-cald, #d29922);cursor:pointer';
+        desfa.textContent='⚠ '+nestiute.length+' lucru(ri) pe care nu le recunosc — arată-mi';
+        const cutie=document.createElement('div');
+        cutie.style.display='none';
+        const avert=document.createElement('div');
+        avert.className='u-nota';
+        avert.style.color='var(--accent-cald, #d29922)';
+        avert.textContent='Nu știu ce sunt. Pot fi date lăsate de aplicații de-ale tale care rulau pe vremea când aveau origine adevărată. Uită-te la câte înregistrări au înainte să hotărăști.';
+        cutie.appendChild(avert);
+        for(const g of nestiute) cutie.appendChild(rand(g,true));
+        desfa.addEventListener('click',()=>{
+          const arata=cutie.style.display==='none';
+          cutie.style.display=arata?'':'none';
+          desfa.textContent=(arata?'⚠ ascunde ce nu recunosc':'⚠ '+nestiute.length+' lucru(ri) pe care nu le recunosc — arată-mi');
+        });
+        gazda.appendChild(desfa); gazda.appendChild(cutie);
+      }
+
+      // ---- în folosință: doar ca să vezi că sunt în siguranță ----
+      if(folosite.length){
+        const t=document.createElement('div');
+        t.style.cssText='padding:14px 2px 4px;font-size:.78rem;color:var(--text-stins);text-transform:uppercase;letter-spacing:.06em';
+        t.textContent='În folosință · nu se ating';
+        gazda.appendChild(t);
+        for(const g of folosite){
+          const r=document.createElement('div');
+          r.style.cssText='padding:7px 2px;font-size:.82rem;color:var(--text-stins);opacity:.75';
+          r.textContent='· '+g.nume+' — '+g.detaliu;
+          gazda.appendChild(r);
+        }
+      }
+    }
+
+    async function aruncaUna(g, b, periculos){
+      const intrebare = periculos
+        ? 'Ștergi „'+g.nume+'"?\n\n'+g.detaliu+'\n\nNU ȘTIU ce e înăuntru. Dacă e o bază lăsată de o aplicație de-a ta, datele ei se pierd. Nu se poate desface.'
+        : 'Ștergi „'+g.nume+'"?\n\n'+g.detaliu+'\n\nNu se poate desface.';
+      if(!confirm(intrebare)) return;
+      b.disabled=true; b.textContent='…';
+      const inainte=await spatiuFolosit();
+      let reusit=false;
+      if(g.fel==='baza')   reusit=await stergeBaza(g.nume);
+      if(g.fel==='camara'){ try{ localStorage.removeItem(g.nume); reusit=true; }catch(e){} }
+      if(g.fel==='cache'){  try{ reusit=await caches.delete(g.nume); }catch(e){} }
+      if(reusit==='blocat'){
+        b.disabled=false; b.textContent='Șterge';
+        instiintare('Baza e ținută deschisă de altă filă. Închide celelalte file cu Logos și încearcă din nou.');
+        return;
+      }
+      if(!reusit){
+        b.disabled=false; b.textContent='Șterge';
+        instiintare('N-am putut șterge „'+g.nume+'".');
+        return;
+      }
+      const dupa=await spatiuFolosit();
+      const eliberat=(inainte!=null && dupa!=null)?Math.max(0, inainte-dupa):null;
+      instiintare('Șters'+(eliberat?' · '+octFrumos(eliberat)+' eliberați':'')+'.');
+      randeaza('doctor');
     }
 
     function lega(){
