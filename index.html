@@ -2855,7 +2855,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
           // La [[#frază]] nu există nume de fișier: fără grija asta, eticheta
           // ieșea „ › frază", cu săgeata atârnând în gol.
           a.textContent = eticheta || (loc ? ((fisier?fisier+' › ':'')+loc) : fisier);
-          // aceeași înfățișare ca legăturile din Documente: pastilă discretă,
+          // pastilă discretă, nu albastru de browser:
           // subliniere plină — se vede că e legătură fără să sară din text
           a.style.cssText='color:'+prefViz.accent+
             ';background:'+prefViz.accent+'16'+
@@ -2881,7 +2881,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
             deschideCuApp(nou, loc||'');
           });
 
-          // apăsare lungă pe legătură → meniu, ca la Documente
+          // apăsare lungă pe legătură → meniu
           let cronoLung=null, aFostLung=false;
           const porneste=()=>{
             aFostLung=false;
@@ -2911,7 +2911,7 @@ function deschideVizualizareSimpla(f, evidentiaza){
     }
 
     /* ---- MENIUL LEGĂTURII (apăsare lungă) ----
-       Ca la Documente: un meniu mic lângă cuvânt, cu deschidere și ștergere.
+       Un meniu mic lângă cuvânt, cu deschidere și ștergere.
        Ștergerea desface AMBELE capete — altfel ar rămâne o legătură care duce
        spre un cuvânt ce nu mai trimite înapoi. */
     function meniulLegaturii(elem, brutInterior, parti, rand){
@@ -3924,50 +3924,6 @@ Nucleu.inregistreaza({
   }
 });
 
-/* ===================== APLICAȚIA: DOCUMENTE (internă) =====================
-   DocCăutare nu mai e oaspete. Rulează în același origin ca Logos, fără
-   sandbox, ca să aibă workeri (pdf.js, căutarea) și acces direct la Depozit.
-   Documentele ei ajung astfel criptate cu parola master, ca tot restul.
-   Fișierul doc-offline.html trebuie să stea lângă index.html. */
-Nucleu.inregistreaza({
-  id:'documente', nume:'Documente', iconita:'▦',
-  montare(corp){
-    // `src` relativ cere o origine adevărată (http/https). Din content:// sau
-    // file:// nu se încarcă — spunem asta pe loc, în loc să lăsăm alb.
-    const oServit = location.protocol==='https:' || location.protocol==='http:';
-    if(!oServit){
-      const n=document.createElement('div');
-      n.style.cssText='padding:26px 22px;line-height:1.7;color:var(--text-stins);font-size:.92rem';
-      n.innerHTML='<b style="color:var(--accent-cald)">Documente are nevoie de Logos servit pe web.</b><br><br>'+
-        'Acum Logos rulează de la <code>'+escHtml(location.protocol)+'</code>, '+
-        'de unde browserul nu poate încărca fișiere alăturate.<br><br>'+
-        'Pune <code>index.html</code> și <code>doc-offline.html</code> pe GitHub Pages '+
-        '(sau pe un server local) și aplicația pornește singură.';
-      corp.appendChild(n);
-      return null;
-    }
-    const ifr=document.createElement('iframe');
-    ifr.src='doc-offline.html';
-    ifr.style.cssText='width:100%;flex:1;min-height:0;border:none;background:#fff';
-    corp.appendChild(ifr);
-
-    // aplicația internă ne trimite problemele ei; le arătăm în bara de titlu
-    const raport=indicatorEroare(corp, 'Documente');
-    function laEroareDoc(ev){
-      if(ev.source!==ifr.contentWindow) return;
-      const d=ev.data;
-      if(d && d.logosDoc==='eroare' && typeof d.text==='string') raport.arata(d.text);
-    }
-    window.addEventListener('message', laEroareDoc);
-
-    // la închidere golim cadrul: pdf.js ține multă memorie
-    return ()=>{
-      window.removeEventListener('message', laEroareDoc);
-      try{ ifr.src='about:blank'; }catch(e){}
-    };
-  }
-});
-
 /* ===================== APLICAȚIA: TERMINAL (română, puternic) ===================== */
 /* ============================================================
    UTILITARE — unelte grupate, ca meniul Start
@@ -4084,6 +4040,13 @@ Nucleu.inregistreaza({
           (persistent===null?'necunoscut':persistent?'✓ activă (browserul nu va șterge singur datele)':'⚠ inactivă — browserul le poate șterge dacă rămâne fără spațiu')+'</div>';
         html+='</div></div>';
 
+        // ---- rămășițe ----
+        // Ce a rămas în telefon de la aplicații scoase sau versiuni vechi.
+        // Nu sunt în depozitul Logos: nu se criptează, nu intră în export,
+        // nu se văd nicăieri — dar ocupă loc.
+        html+='<div class="u-rand"><label>Rămășițe</label>'+
+              '<div data-ramasite><div class="u-info" style="text-align:left;padding:10px 2px;color:var(--text-stins)">Se caută…</div></div></div>';
+
         // ---- statistici ----
         html+='<div class="u-rand"><label>Statistici</label><div class="u-info" style="text-align:left;padding:10px 2px;line-height:2">';
         html+='<div>Fișiere: '+fisiereReale+'  ·  Aplicații: '+apps+'</div>';
@@ -4091,6 +4054,7 @@ Nucleu.inregistreaza({
         html+='</div></div>';
 
         corpU.innerHTML=html;
+        cautaRamasite(corpU.querySelector('[data-ramasite]'));
 
         if(stricate.length){
           const gazda=corpU.querySelector('[data-corupte]');
@@ -4103,6 +4067,155 @@ Nucleu.inregistreaza({
         }
       }
       lega();
+    }
+
+    /* ---------- RĂMĂȘIȚE ----------
+       Browserul ține datele pe origine, nu pe aplicație. O aplicație scoasă
+       din Logos își lasă baza în urmă, întreagă și nevăzută: nimic n-o mai
+       deschide, nimic n-o mai arată, dar ocupă loc și stă necriptată, fiindcă
+       n-a trecut niciodată prin Depozit. Aici le găsim și le scoatem. */
+    const octFrumos=b=>b>=1073741824?(b/1073741824).toFixed(2)+' GB':
+                       b>=1048576?(b/1048576).toFixed(1)+' MB':
+                       b>=1024?(b/1024).toFixed(0)+' KB':b+' B';
+
+    async function spatiuFolosit(){
+      try{
+        if(navigator.storage && navigator.storage.estimate)
+          return (await navigator.storage.estimate()).usage||0;
+      }catch(e){}
+      return null;
+    }
+
+    // Numără ce e într-o bază străină. Deschidem FĂRĂ număr de versiune:
+    // așa o luăm așa cum e, fără s-o schimbăm.
+    function cerceteazaBaza(nume){
+      return new Promise(gata=>{
+        let cerere;
+        try{ cerere=indexedDB.open(nume); }catch(e){ gata(null); return; }
+        cerere.onerror=()=>gata(null);
+        cerere.onblocked=()=>gata(null);
+        cerere.onsuccess=async ev=>{
+          const bd=ev.target.result;
+          const magazii=Array.from(bd.objectStoreNames);
+          let total=0;
+          for(const m of magazii){
+            total+=await new Promise(r=>{
+              try{
+                const c=bd.transaction(m,'readonly').objectStore(m).count();
+                c.onsuccess=()=>r(c.result||0); c.onerror=()=>r(0);
+              }catch(e){ r(0); }
+            });
+          }
+          bd.close();
+          gata({magazii, total});
+        };
+      });
+    }
+
+    function stergeBaza(nume){
+      return new Promise(gata=>{
+        const c=indexedDB.deleteDatabase(nume);
+        c.onsuccess=()=>gata(true);
+        c.onerror=()=>gata(false);
+        // „blocat" înseamnă că o filă deschisă încă ține baza în mână
+        c.onblocked=()=>gata('blocat');
+      });
+    }
+
+    async function cautaRamasite(gazda){
+      if(!gazda) return;
+      const gasite=[];
+
+      // 1. alte baze de date în aceeași origine
+      try{
+        if(indexedDB.databases){
+          for(const b of await indexedDB.databases()){
+            if(!b.name || b.name==='logos_depozit') continue;
+            const c=await cerceteazaBaza(b.name);
+            gasite.push({fel:'baza', nume:b.name,
+              detaliu: c ? (c.total+' înregistrări în: '+c.magazii.join(', ')) : 'nu am putut citi înăuntru'});
+          }
+        }
+      }catch(e){}
+
+      // 2. cămări rămase de la aplicații-oaspete care nu mai există
+      try{
+        const toate=await Depozit.toate();
+        const vii=new Set();
+        for(const f of toate) if(f.tip!=='folder'){
+          vii.add(f.cale); vii.add(f.cale.split('/').pop());
+        }
+        for(let i=0;i<localStorage.length;i++){
+          const k=localStorage.key(i);
+          if(!k || k.indexOf('camara_oaspete_')!==0) continue;
+          const numeApp=k.slice('camara_oaspete_'.length);
+          if(vii.has(numeApp)) continue;
+          gasite.push({fel:'camara', nume:k, aplicatie:numeApp,
+            detaliu:'cămara aplicației „'+numeApp+'", care nu mai e în depozit · '+
+                    octFrumos((localStorage.getItem(k)||'').length)});
+        }
+      }catch(e){}
+
+      // 3. cache-uri vechi (paznicul le curăță la activare; dacă a fost
+      //    întreruptă, rămân aici)
+      try{
+        if(window.caches){
+          const nume=(await caches.keys()).sort();
+          for(const n of nume.slice(0,-1))
+            gasite.push({fel:'cache', nume:n, detaliu:'copie veche a aplicației Logos'});
+        }
+      }catch(e){}
+
+      deseneazaRamasite(gazda, gasite);
+    }
+
+    function deseneazaRamasite(gazda, gasite){
+      gazda.innerHTML='';
+      if(!gasite.length){
+        gazda.innerHTML='<div class="u-info" style="text-align:left;padding:10px 2px">✓ Nimic de aruncat. Tot ce e pe telefon e folosit.</div>';
+        return;
+      }
+      const nota=document.createElement('div');
+      nota.className='u-nota';
+      nota.textContent='Date rămase de la aplicații scoase sau versiuni vechi. Nu sunt în depozitul Logos: nu se criptează și nu intră în export.';
+      gazda.appendChild(nota);
+
+      for(const g of gasite){
+        const r=document.createElement('div');
+        r.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid #21262d';
+        const stanga=document.createElement('div');
+        stanga.style.cssText='flex:1;min-width:0';
+        stanga.innerHTML='<div style="font-size:.9rem">'+escHtml(g.nume)+'</div>'+
+                         '<div style="font-size:.78rem;color:var(--text-stins);margin-top:2px">'+escHtml(g.detaliu)+'</div>';
+        const b=document.createElement('button');
+        b.textContent='Șterge';
+        b.style.cssText='background:transparent;border:1px solid var(--rosu, #f85149);color:var(--rosu, #f85149);border-radius:8px;padding:7px 14px;font-size:.84rem;flex:none';
+        b.addEventListener('click', async ()=>{
+          if(!confirm('Ștergi „'+g.nume+'"?\n\nNu se poate desface. Ce e înăuntru se pierde.')) return;
+          b.disabled=true; b.textContent='…';
+          const inainte=await spatiuFolosit();
+          let reusit=false;
+          if(g.fel==='baza')  reusit=await stergeBaza(g.nume);
+          if(g.fel==='camara'){ try{ localStorage.removeItem(g.nume); reusit=true; }catch(e){} }
+          if(g.fel==='cache'){ try{ reusit=await caches.delete(g.nume); }catch(e){} }
+          if(reusit==='blocat'){
+            b.disabled=false; b.textContent='Șterge';
+            instiintare('Baza e ținută deschisă de altă filă. Închide celelalte file cu Logos și încearcă din nou.');
+            return;
+          }
+          if(!reusit){
+            b.disabled=false; b.textContent='Șterge';
+            instiintare('N-am putut șterge „'+g.nume+'".');
+            return;
+          }
+          const dupa=await spatiuFolosit();
+          const eliberat=(inainte!=null && dupa!=null)?Math.max(0, inainte-dupa):null;
+          instiintare('Șters'+(eliberat?' · '+octFrumos(eliberat)+' eliberați':'')+'.');
+          randeaza('doctor');
+        });
+        r.appendChild(stanga); r.appendChild(b);
+        gazda.appendChild(r);
+      }
     }
 
     function lega(){
