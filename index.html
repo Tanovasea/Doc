@@ -4008,6 +4008,31 @@ Nucleu.inregistreaza({
         try{ if(navigator.storage && navigator.storage.estimate) est=await navigator.storage.estimate(); }catch(e){}
 
         let html='';
+
+        /* ---- COPIA DE SIGURANȚĂ ----
+           Stă prima fiindcă e singurul lucru care te apără de tot deodată:
+           de o aplicație scăpată de sub control, de o greșeală de-a ta, și
+           de telefonul pierdut — pe ăsta din urmă nimic altceva nu-l acoperă.
+           Logos știa să exporte, dar nu ținea minte când. */
+        {
+          const cand=Memorie.ia().ultimulExport||0;
+          const zile=cand?Math.floor((Date.now()-cand)/86400000):null;
+          // româna cere „o zi", „3 zile", dar „20 de zile"
+          const ziua=n=> n===1?'o zi':(n<20?n+' zile':n+' de zile');
+          let culoare='var(--verde, #3fb950)', vorba;
+          if(!cand){ culoare='var(--rosu, #f85149)'; vorba='Niciodată. Tot ce e aici trăiește într-un singur loc.'; }
+          else if(zile<=7)  vorba='Acum '+(zile===0?'mai puțin de o zi':ziua(zile))+'.';
+          else if(zile<=30){ culoare='var(--accent-cald, #d29922)'; vorba='Acum '+ziua(zile)+'.'; }
+          else { culoare='var(--rosu, #f85149)'; vorba='Acum '+ziua(zile)+'. E mult.'; }
+          html+='<div class="u-rand"><label>Copia de siguranță</label>'+
+                '<div class="u-info" style="text-align:left;padding:10px 2px;line-height:1.8">'+
+                '<div style="color:'+culoare+';font-size:1.02rem">'+escHtml(vorba)+'</div>'+
+                (cand?'<div style="color:var(--text-stins);font-size:.82rem">'+
+                      new Date(cand).toLocaleString('ro-RO')+'</div>':'')+
+                '<div style="color:var(--text-stins);font-size:.82rem;margin-top:4px">'+
+                'Din Terminal: <code>export</code> — descarcă tot, criptat cu parola master.</div>'+
+                '</div></div>';
+        }
         // ---- criptare ----
         html+='<div class="u-rand"><label>Criptare</label><div class="u-info" style="text-align:left;padding:10px 2px;line-height:2">';
         html+='<div>'+(stricate.length?'⚠️ ':'🔒 ')+'AES-GCM 256 · PBKDF2 310.000 iterații</div>';
@@ -4284,6 +4309,55 @@ Nucleu.inregistreaza({
         }
       }catch(e){}
 
+      // 6. copiile de siguranță ale punții.
+      //    Puntea păstrează versiunea dinainte la fiecare scriere a unei
+      //    aplicații — plasă bună, dar nu se șterge niciodată, nici măcar
+      //    când ștergi originalul. Le-am scos din verificarea de la punctul 5
+      //    ca prefix cunoscut, deci erau invizibile cu totul.
+      try{
+        const brute3=await Depozit.bruteTot();
+        const exista=new Set(brute3.map(f=>f.cale));
+        const orfane=[], tinute=[];
+        let octOrfane=0, octTinute=0;
+        for(const f of brute3){
+          if(!(f.cale||'').startsWith('__ver1:')) continue;
+          let m=0; try{ m=new Blob([f.continut||'']).size; }catch(e){}
+          const original=f.cale.slice('__ver1:'.length);
+          if(exista.has(original)){ tinute.push(f.cale); octTinute+=m; }
+          else { orfane.push(f.cale); octOrfane+=m; }
+        }
+        if(orfane.length)
+          deAruncat.push({fel:'fisiere', nume:'copii de siguranță fără original', cai:orfane,
+            detaliu:orfane.length+' copii ale unor fișiere care nu mai există · '+octFrumos(octOrfane)});
+        if(tinute.length)
+          folosite.push({nume:'__ver1: — '+tinute.length+' copii de siguranță',
+            detaliu:'versiunea dinainte a fișierelor scrise de aplicații · '+octFrumos(octTinute)+
+                    ' · se aduc înapoi cu „recupereaza"'});
+      }catch(e){}
+
+      // 7. însemnări rămase în Memorie.
+      //    Risipa e mărunta parte. Un „permit lui X să scrie în Y" rămâne
+      //    scris după ce ștergi aplicația X: pui mâine alta cu același nume
+      //    și are permisiunea dinainte, fără să te mai întrebe nimeni.
+      try{
+        const brute4=await Depozit.bruteTot();
+        const exista=new Set(brute4.map(f=>f.cale));
+        const harta=Proprietate.harta(), granturi=Proprietate.granturi();
+        const propMoarte=[], grantMoarte=[];
+        for(const cale in harta) if(!exista.has(cale)) propMoarte.push(cale);
+        for(const g in granturi){
+          const buc=g.split(' → ');
+          const app=buc[0], cale=buc.slice(1).join(' → ');
+          if(!vii.has(app) || !exista.has(cale)) grantMoarte.push(g);
+        }
+        if(propMoarte.length)
+          deAruncat.push({fel:'proprietari', nume:'însemnări de proprietate fără fișier', chei:propMoarte,
+            detaliu:propMoarte.length+' fișiere însemnate care nu mai există'});
+        if(grantMoarte.length)
+          deAruncat.push({fel:'granturi', nume:'permisiuni rămase de la aplicații scoase', chei:grantMoarte,
+            detaliu:grantMoarte.length+' permisiuni care ar reînvia dacă pui altă aplicație cu același nume'});
+      }catch(e){}
+
       deseneazaRamasite(gazda, deAruncat, folosite, straine);
     }
 
@@ -4372,6 +4446,17 @@ Nucleu.inregistreaza({
           if(await Depozit.sterge(cale)){ cate++; try{ await Proprietate.elibereaza(cale); }catch(e){} }
         }
         reusit = cate>0;
+      }
+      if(g.fel==='proprietari'){
+        try{ for(const cale of (g.chei||[])) await Proprietate.elibereaza(cale); reusit=true; }catch(e){}
+      }
+      if(g.fel==='granturi'){
+        try{
+          const gr={...Proprietate.granturi()};
+          for(const k of (g.chei||[])) delete gr[k];
+          await Memorie.salveaza({granturi:gr});
+          reusit=true;
+        }catch(e){}
       }
       if(g.fel==='baza')   reusit=await stergeBaza(g.nume);
       if(g.fel==='camara'){ try{ localStorage.removeItem(g.nume); reusit=true; }catch(e){} }
@@ -5030,6 +5115,9 @@ Nucleu.inregistreaza({
           a.href=url; a.download=nume;
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(()=>URL.revokeObjectURL(url),1000);
+          // ținem minte clipa: Doctorul o arată, fiindcă exportul e singurul
+          // lucru care te apără și de telefonul pierdut
+          try{ await Memorie.salveaza({ultimulExport:Date.now()}); }catch(e){}
           scrie('Backup criptat descărcat: '+nume+'  ('+volumFis(json)+')','cald');
           scrie('E criptat cu parola master — fără ea, fișierul e inutil. Pune-l la loc sigur (card, cloud).','stins');
         }catch(e){
