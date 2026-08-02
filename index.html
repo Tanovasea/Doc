@@ -4095,9 +4095,15 @@ Nucleu.inregistreaza({
           html+='<div class="u-nota">Aceste '+dupaMarime.length+' duc '+
                 (stocat?Math.round(suma/stocat*100):0)+'% din tot ce e stocat.</div>';
           html+='<div class="u-info" style="text-align:left;padding:6px 2px;line-height:1.9">';
-          for(const f of dupaMarime)
+          // și cine l-a scris — un nume ca `__dc_h:12` nu spune nimic singur
+          const numeApps=new Set(decriptate.filter(x=>x.tip!=='folder').map(x=>x.cale));
+          for(const f of dupaMarime){
+            const stapan=Proprietate.cine(f.cale);
+            const semn = stapan ? (numeApps.has(stapan)?stapan:stapan+' — neinstalată') : '';
             html+='<div style="display:flex;gap:10px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
-                  escHtml(f.cale)+'</span><span style="color:var(--text-stins);flex:none">'+fmtOcteti(f.marime)+'</span></div>';
+                  escHtml(f.cale)+(semn?' <span style="color:var(--text-stins);font-size:.86em">· '+escHtml(semn)+'</span>':'')+
+                  '</span><span style="color:var(--text-stins);flex:none">'+fmtOcteti(f.marime)+'</span></div>';
+          }
           html+='</div></div>';
         }
 
@@ -4227,6 +4233,30 @@ Nucleu.inregistreaza({
         }
       }catch(e){}
 
+      // 4. fișiere scrise de aplicații-oaspete care nu mai sunt instalate.
+      //    Aici nu ghicim nimic: Logos a însemnat el însuși stăpânul, la
+      //    fiecare scriere prin punte. Scoaterea unei aplicații îi scoate
+      //    fișierul, nu și ce a scris ea — asta rămânea nevăzut.
+      try{
+        const harta=Proprietate.harta();
+        const brute=await Depozit.bruteTot();
+        const marimi={}; for(const f of brute){ try{ marimi[f.cale]=new Blob([f.continut||'']).size; }catch(e){ marimi[f.cale]=0; } }
+        const peApp={};
+        for(const cale in harta){
+          const app=harta[cale];
+          if(!app || vii.has(app)) continue;             // aplicația e încă în depozit
+          if(!(cale in marimi)) continue;                // fișierul nu mai există
+          (peApp[app]=peApp[app]||{cai:[], octeti:0});
+          peApp[app].cai.push(cale);
+          peApp[app].octeti+=marimi[cale]||0;
+        }
+        for(const app in peApp){
+          const g=peApp[app];
+          deAruncat.push({fel:'fisiere', nume:'fișierele aplicației „'+app+'"', cai:g.cai,
+            detaliu:g.cai.length+' fișiere scrise de „'+app+'", care nu mai e instalată · '+octFrumos(g.octeti)});
+        }
+      }catch(e){}
+
       deseneazaRamasite(gazda, deAruncat, folosite, straine);
     }
 
@@ -4309,6 +4339,13 @@ Nucleu.inregistreaza({
       b.disabled=true; b.textContent='…';
       const inainte=await spatiuFolosit();
       let reusit=false;
+      if(g.fel==='fisiere'){
+        let cate=0;
+        for(const cale of (g.cai||[])){
+          if(await Depozit.sterge(cale)){ cate++; try{ await Proprietate.elibereaza(cale); }catch(e){} }
+        }
+        reusit = cate>0;
+      }
       if(g.fel==='baza')   reusit=await stergeBaza(g.nume);
       if(g.fel==='camara'){ try{ localStorage.removeItem(g.nume); reusit=true; }catch(e){} }
       if(g.fel==='cache'){  try{ reusit=await caches.delete(g.nume); }catch(e){} }
