@@ -4048,9 +4048,38 @@ Nucleu.inregistreaza({
               '<div data-ramasite><div class="u-info" style="text-align:left;padding:10px 2px;color:var(--text-stins)">Se caută…</div></div></div>';
 
         // ---- statistici ----
+        // Cât ocupă textul tău, cât ocupă cum stă pe disc, și cât e restul.
+        // Fără despărțirea asta, „de trei ori mai mult" e o bănuială: în
+        // totalul browserului intră și copia aplicației, și cămările, și
+        // bazele altor aplicații.
+        let stocat=0;
+        for(const f of brute){ try{ stocat+=new Blob([f.continut||'']).size; }catch(e){} }
+        let camari=0;
+        try{
+          for(let i=0;i<localStorage.length;i++){
+            const k=localStorage.key(i);
+            camari+=(k||'').length+((localStorage.getItem(k)||'').length);
+          }
+        }catch(e){}
+        let copiiApp=0;
+        try{
+          if(window.caches) for(const n of await caches.keys()){
+            const c=await caches.open(n);
+            for(const cerere of await c.keys()){
+              const r=await c.match(cerere);
+              if(r){ try{ copiiApp+=(await r.clone().blob()).size; }catch(e){} }
+            }
+          }
+        }catch(e){}
+
+        const raport=octeti?(stocat/octeti):0;
         html+='<div class="u-rand"><label>Statistici</label><div class="u-info" style="text-align:left;padding:10px 2px;line-height:2">';
         html+='<div>Fișiere: '+fisiereReale+'  ·  Aplicații: '+apps+'</div>';
-        html+='<div>Spațiu total (necriptat, aproximativ): '+fmtOcteti(octeti)+'</div>';
+        html+='<div>Textul tău, în clar: <b style="font-size:1em">'+fmtOcteti(octeti)+'</b></div>';
+        html+='<div>Cum stă pe disc, criptat: <b style="font-size:1em">'+fmtOcteti(stocat)+'</b>'+
+              (raport?' <span style="color:var(--text-stins)">(×'+raport.toFixed(2)+')</span>':'')+'</div>';
+        html+='<div style="color:var(--text-stins)">Copia aplicației: '+fmtOcteti(copiiApp)+
+              '  ·  Cămări oaspeți: '+fmtOcteti(camari)+'</div>';
         html+='</div></div>';
 
         corpU.innerHTML=html;
@@ -4122,47 +4151,39 @@ Nucleu.inregistreaza({
       });
     }
 
-    /* Ce știm despre origine.
-       „A lista tot ce nu e depozitul Logos" e o unealtă proastă: pune datele
-       tale la o apăsare de ștergere, fără să-ți spună ce sunt. Aplicațiile-
-       oaspete care rulau pe vremea când aveau origine adevărată puteau să-și
-       facă baze proprii aici; alea sunt ale tale, nu gunoi.
-       Așa că separăm: ce e sigur de aruncat, ce e în folosință, și ce nu
-       recunoaștem — ultimele două fără buton la vedere. */
+    /* Ce știm despre origine — și, mai ales, ce NU știm.
+       Aveam aici o listă de „gunoi știut", cu `doccautare3` în ea, fiindcă
+       scosesem aplicația Documente. Dar o bază nu e a unei aplicații, e a
+       originii: aceleași date sunt acum ale lui doc-offline pornit ca oaspete.
+       Logos a strigat „aruncă" peste date vii. O listă de nume ghicite nu
+       poate fi de încredere, fiindcă presupune că știm ce rulează — și nu
+       știm.
+       Regula de-acum: propunem la ștergere DOAR ce a făcut Logos însuși și
+       poate dovedi că a rămas fără stăpân. Bazele străine se arată, cu ce e
+       înăuntru, fără culoare de alarmă și fără buton la vedere. */
     const BAZE_ALE_NOASTRE={ 'logos_depozit':'depozitul Logos — fișierele tale' };
-    const GUNOI_STIUT={ 'doccautare3':'baza aplicației Documente, scoasă din Logos' };
 
     async function cautaRamasite(gazda){
       if(!gazda) return;
-      const deAruncat=[], folosite=[], nestiute=[];
+      const deAruncat=[], folosite=[], straine=[];
 
-      // 1. baze de date din aceeași origine
+      // 1. baze de date din aceeași origine. Nu ghicim a cui e niciuna.
       try{
         if(indexedDB.databases){
           for(const b of await indexedDB.databases()){
             if(!b.name) continue;
-            if(BAZE_ALE_NOASTRE[b.name]){
-              folosite.push({nume:b.name, detaliu:BAZE_ALE_NOASTRE[b.name]});
-              continue;
-            }
+            if(BAZE_ALE_NOASTRE[b.name]){ folosite.push({nume:b.name, detaliu:BAZE_ALE_NOASTRE[b.name]}); continue; }
             const c=await cerceteazaBaza(b.name);
-            const cate=c?(c.total+' înregistrări în: '+c.magazii.join(', ')):'nu am putut citi înăuntru';
-            if(GUNOI_STIUT[b.name]) deAruncat.push({fel:'baza', nume:b.name, detaliu:GUNOI_STIUT[b.name]+' · '+cate});
-            else nestiute.push({fel:'baza', nume:b.name, detaliu:cate});
-          }
-        } else {
-          // Firefox nu dă lista. Cel puțin de gunoiul știut ne putem ocupa.
-          for(const n in GUNOI_STIUT){
-            const c=await cerceteazaBaza(n);
-            if(c && c.magazii.length)
-              deAruncat.push({fel:'baza', nume:n, detaliu:GUNOI_STIUT[n]+' · '+c.total+' înregistrări'});
+            straine.push({fel:'baza', nume:b.name,
+              detaliu: c ? (c.total+' înregistrări în: '+c.magazii.join(', ')) : 'nu am putut citi înăuntru'});
           }
         }
       }catch(e){}
 
-      // 2. cămările aplicațiilor-oaspete
+      // 2. cămările aplicațiilor-oaspete. Astea le-a făcut Logos, cu numele
+      //    aplicației în cheie, deci chiar poate spune care a rămas orfană.
       try{
-        const toate=await Depozit.toateNefiltrate();   // și cele ascunse: să nu par orfan cine e viu
+        const toate=await Depozit.toateNefiltrate();   // și ascunsele: să nu par orfan cine e viu
         const vii=new Set();
         for(const f of toate) if(f.tip!=='folder'){ vii.add(f.cale); vii.add(f.cale.split('/').pop()); }
         for(let i=0;i<localStorage.length;i++){
@@ -4172,11 +4193,11 @@ Nucleu.inregistreaza({
           const cat=octFrumos((localStorage.getItem(k)||'').length);
           if(vii.has(numeApp)) folosite.push({nume:k, detaliu:'cămara aplicației „'+numeApp+'", care e în depozit · '+cat});
           else deAruncat.push({fel:'camara', nume:k,
-                 detaliu:'cămara aplicației „'+numeApp+'", care nu mai există · '+cat});
+                 detaliu:'cămara aplicației „'+numeApp+'", care nu mai e în depozit · '+cat});
         }
       }catch(e){}
 
-      // 3. copii ale Logos-ului. Cea mai nouă e cea în folosință.
+      // 3. copiile Logos-ului, făcute de paznicul lui. Cea mai nouă e cea vie.
       try{
         if(window.caches){
           const nume=(await caches.keys()).sort();
@@ -4187,13 +4208,13 @@ Nucleu.inregistreaza({
         }
       }catch(e){}
 
-      deseneazaRamasite(gazda, deAruncat, folosite, nestiute);
+      deseneazaRamasite(gazda, deAruncat, folosite, straine);
     }
 
-    function deseneazaRamasite(gazda, deAruncat, folosite, nestiute){
+    function deseneazaRamasite(gazda, deAruncat, folosite, straine){
       gazda.innerHTML='';
 
-      function rand(g, periculos){
+      function rand(g, strain){
         const r=document.createElement('div');
         r.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid #21262d';
         const stanga=document.createElement('div');
@@ -4203,48 +4224,50 @@ Nucleu.inregistreaza({
         r.appendChild(stanga);
         const b=document.createElement('button');
         b.textContent='Șterge';
-        b.style.cssText='background:transparent;border:1px solid var(--rosu, #f85149);color:var(--rosu, #f85149);border-radius:8px;padding:7px 14px;font-size:.84rem;flex:none';
-        b.addEventListener('click',()=>aruncaUna(g, b, periculos));
+        const culoare = strain ? 'var(--text-stins, #8b949e)' : 'var(--rosu, #f85149)';
+        b.style.cssText='background:transparent;border:1px solid '+culoare+';color:'+culoare+
+                        ';border-radius:8px;padding:7px 14px;font-size:.84rem;flex:none';
+        b.addEventListener('click',()=>aruncaUna(g, b, strain));
         r.appendChild(b);
         return r;
       }
 
-      // ---- de aruncat ----
+      // ---- ce a făcut Logos și a rămas fără stăpân ----
       if(!deAruncat.length){
         const g=document.createElement('div');
         g.className='u-info'; g.style.cssText='text-align:left;padding:10px 2px';
-        g.textContent='✓ Nimic de aruncat.';
+        g.textContent='✓ Nimic rămas fără stăpân.';
         gazda.appendChild(g);
       } else {
         const n=document.createElement('div');
         n.className='u-nota';
-        n.textContent='Rămase de la aplicații scoase sau versiuni vechi. Nimic din ce e în folosință nu apare aici.';
+        n.textContent='Făcute de Logos, rămase fără aplicația lor. Astea le poate dovedi.';
         gazda.appendChild(n);
         for(const g of deAruncat) gazda.appendChild(rand(g,false));
       }
 
-      // ---- ce nu recunosc: la vedere doar dacă ceri ----
-      if(nestiute.length){
+      // ---- baze străine: se arată, nu se acuză ----
+      if(straine.length){
         const desfa=document.createElement('div');
-        desfa.style.cssText='padding:12px 2px;font-size:.82rem;color:var(--accent-cald, #d29922);cursor:pointer';
-        desfa.textContent='⚠ '+nestiute.length+' lucru(ri) pe care nu le recunosc — arată-mi';
+        desfa.style.cssText='padding:12px 2px;font-size:.82rem;color:var(--text-stins);cursor:pointer;text-decoration:underline;text-underline-offset:3px';
+        const eticheta=()=> straine.length+' bază/baze care nu sunt ale Logos-ului — arată-mi';
+        desfa.textContent=eticheta();
         const cutie=document.createElement('div');
         cutie.style.display='none';
         const avert=document.createElement('div');
         avert.className='u-nota';
-        avert.style.color='var(--accent-cald, #d29922)';
-        avert.textContent='Nu știu ce sunt. Pot fi date lăsate de aplicații de-ale tale care rulau pe vremea când aveau origine adevărată. Uită-te la câte înregistrări au înainte să hotărăști.';
+        avert.textContent='Browserul ține datele pe origine, nu pe aplicație: nu pot ști a cui e fiecare. Pot fi ale unei aplicații-oaspete pe care o folosești acum. Uită-te ce e înăuntru înainte de orice.';
         cutie.appendChild(avert);
-        for(const g of nestiute) cutie.appendChild(rand(g,true));
+        for(const g of straine) cutie.appendChild(rand(g,true));
         desfa.addEventListener('click',()=>{
           const arata=cutie.style.display==='none';
           cutie.style.display=arata?'':'none';
-          desfa.textContent=(arata?'⚠ ascunde ce nu recunosc':'⚠ '+nestiute.length+' lucru(ri) pe care nu le recunosc — arată-mi');
+          desfa.textContent=arata?'ascunde':eticheta();
         });
         gazda.appendChild(desfa); gazda.appendChild(cutie);
       }
 
-      // ---- în folosință: doar ca să vezi că sunt în siguranță ----
+      // ---- în folosință ----
       if(folosite.length){
         const t=document.createElement('div');
         t.style.cssText='padding:14px 2px 4px;font-size:.78rem;color:var(--text-stins);text-transform:uppercase;letter-spacing:.06em';
@@ -4259,9 +4282,9 @@ Nucleu.inregistreaza({
       }
     }
 
-    async function aruncaUna(g, b, periculos){
-      const intrebare = periculos
-        ? 'Ștergi „'+g.nume+'"?\n\n'+g.detaliu+'\n\nNU ȘTIU ce e înăuntru. Dacă e o bază lăsată de o aplicație de-a ta, datele ei se pierd. Nu se poate desface.'
+    async function aruncaUna(g, b, strain){
+      const intrebare = strain
+        ? 'Ștergi „'+g.nume+'"?\n\n'+g.detaliu+'\n\nNu e o bază a Logos-ului și nu pot ști a cui e. Dacă o folosește vreo aplicație de-a ta, datele ei se pierd. Nu se poate desface.'
         : 'Ștergi „'+g.nume+'"?\n\n'+g.detaliu+'\n\nNu se poate desface.';
       if(!confirm(intrebare)) return;
       b.disabled=true; b.textContent='…';
