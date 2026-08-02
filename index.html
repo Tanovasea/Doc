@@ -4082,6 +4082,25 @@ Nucleu.inregistreaza({
               '  ·  Cămări oaspeți: '+fmtOcteti(camari)+'</div>';
         html+='</div></div>';
 
+        // ---- cele mai mari ----
+        // Totalul singur nu spune nimic. Aproape întotdeauna câteva fișiere
+        // mari duc aproape tot, iar restul sunt firimituri.
+        const dupaMarime=brute
+          .filter(f=>f.tip!=='folder')
+          .map(f=>{ let m=0; try{ m=new Blob([f.continut||'']).size; }catch(e){} return {cale:f.cale, tip:f.tip, marime:m}; })
+          .sort((a,b)=>b.marime-a.marime).slice(0,6);
+        if(dupaMarime.length && dupaMarime[0].marime>0){
+          const suma=dupaMarime.reduce((s,f)=>s+f.marime,0);
+          html+='<div class="u-rand"><label>Cele mai mari</label>';
+          html+='<div class="u-nota">Aceste '+dupaMarime.length+' duc '+
+                (stocat?Math.round(suma/stocat*100):0)+'% din tot ce e stocat.</div>';
+          html+='<div class="u-info" style="text-align:left;padding:6px 2px;line-height:1.9">';
+          for(const f of dupaMarime)
+            html+='<div style="display:flex;gap:10px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
+                  escHtml(f.cale)+'</span><span style="color:var(--text-stins);flex:none">'+fmtOcteti(f.marime)+'</span></div>';
+          html+='</div></div>';
+        }
+
         corpU.innerHTML=html;
         cautaRamasite(corpU.querySelector('[data-ramasite]'));
 
