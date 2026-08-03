@@ -2113,9 +2113,27 @@ const Legaturi = (()=>{
     }
     catre.delete(cale);
   }
+  /* `[[…]]` înseamnă legătură doar în text scris de om.
+     În codul unei aplicații, `[["ft","ft"]]` e o listă de liste, iar
+     `[[0,1,65535]]` o matrice — nu trimiteri. Citindu-le pe toate la fel,
+     verificarea raporta drept legături stricate bucăți de JavaScript.
+     Așa că întrebăm întâi ce fel de fișier e. */
+  function eTextDeCitit(f){
+    if(!f || f.tip==='folder' || typeof f.continut!=='string') return false;
+    if(f.ascuns || /^__/.test(f.cale)) return false;
+    if(f.tip==='html' || f.tip==='backup' || f.tip==='versiune') return false;
+    const cale=f.cale||'';
+    if(cale.includes('.')){
+      const ext=(cale.split('.').pop()||'').toLowerCase();
+      if(!['md','markdown','txt','text','note'].includes(ext)) return false;
+    }
+    // fișiere fără extensie: ne uităm la ce e înăuntru
+    const cap=f.continut.slice(0,300).toLowerCase();
+    if(cap.includes('<!doctype') || cap.includes('<html') || cap.includes('<script')) return false;
+    return true;
+  }
   function adauga(f){
-    if(!f || f.tip==='folder' || typeof f.continut!=='string') return;
-    if(f.ascuns || /^__/.test(f.cale)) return;
+    if(!eTextDeCitit(f)) return;
     const tinte=extrage(f.continut);
     if(!tinte.length) return;
     catre.set(f.cale, new Set(tinte));
@@ -2169,7 +2187,7 @@ const Legaturi = (()=>{
   }
 
   return {extrage, actualizeaza, uita, construieste, esteGata, rezolva,
-          iesiri, intrari, nerezolvate, cheie, despicaTinta, TIPAR};
+          iesiri, intrari, nerezolvate, cheie, despicaTinta, eTextDeCitit, TIPAR};
 })();
 
 /* ---------- INDICATOR DE ERORI ----------
@@ -4559,7 +4577,8 @@ Nucleu.inregistreaza({
     }
 
     async function adunaLegaturi(){
-      const toate=(await Depozit.toate()).filter(f=>f.tip!=='folder' && typeof f.continut==='string');
+      // aceeași regulă ca la indexare: numai text scris de tine, nu cod
+      const toate=(await Depozit.toate()).filter(f=>Legaturi.eTextDeCitit(f));
       const dupaCale={}; for(const f of toate) dupaCale[f.cale]=f;
       const cheiExistente=new Map();
       for(const f of toate) cheiExistente.set(Legaturi.cheie(f.cale), f);
