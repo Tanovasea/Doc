@@ -8,12 +8,13 @@
    la activare șterge tot ce e din versiunile trecute.
    ============================================================ */
 
-const VERSIUNE = 'logos-2026-08-06-aq';   // ← schimbă asta la fiecare încărcare
+const VERSIUNE = 'logos-2026-08-06-ar';   // ← schimbă asta la fiecare încărcare
 
 const FISIERE = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './icon-180.png',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png'
