@@ -668,7 +668,11 @@ const Cripto = (()=>{
 
   function areLacat(){ return !!localStorage.getItem(CHEIE_LS); }
   function esteDeblocat(){ return !!cheieCurenta; }
-  function blocheaza(){ cheieCurenta=null; idCurent=null; cheieMostenire=null; inel.clear(); }
+  function blocheaza(){
+    cheieCurenta=null; idCurent=null; cheieMostenire=null; inel.clear();
+    // odată cu cheile piere și copia clară din RAM — nimic decriptat nu rămâne în urmă
+    try{ if(typeof Depozit!=='undefined' && Depozit.golesteCache) Depozit.golesteCache(); }catch(e){}
+  }
 
   async function derivaCheie(parola, sareBuf, iteratii){
     const enc=new TextEncoder();
@@ -1022,6 +1026,28 @@ const EcranLacat = (()=>{
 const Depozit = (()=>{
   const NUME_BD='logos_depozit', MAGAZIE='fisiere';
   let bd=null;
+
+  /* CACHE ÎN MEMORIE (decriptat).
+     Pe disc totul rămâne criptat (AES-GCM), dar cât timp Logos e deblocat,
+     lucrăm pe o copie clară din RAM: cale -> înregistrare decriptată.
+     Așa căutarea, listarea și legăturile nu mai decriptează depozitul la
+     fiecare pas. Cache-ul se golește complet la blocare — nimic clar nu
+     supraviețuiește lacătului. */
+  const cache=new Map();          // cale -> înregistrare cu continut DECRIPTAT
+  let cacheComplet=false;         // am încărcat deja tot depozitul?
+  let incarcare=null;             // promisiune partajată: o singură încărcare completă odată
+  function poateMemora(){ return !Cripto.areLacat() || Cripto.esteDeblocat(); }
+  function copie(rec){ return rec ? {...rec} : null; }
+  function pastreaza(rec){
+    // memorăm DOAR când Logos e deblocat: '⚠ blocat' nu are cum să rămână
+    // în cache, fiindcă în starea blocată nu se memorează nimic. Fișierele
+    // cu adevărat necitibile (cheie lipsă) rămân așa și pe disc; migrarea
+    // le rescrie prin scrie(), care împrospătează și cache-ul.
+    if(!rec || !poateMemora()) return;
+    cache.set(rec.cale, {...rec});
+  }
+  function golesteCache(){ cache.clear(); cacheComplet=false; incarcare=null; }
+
   function deschide(){
     return new Promise((rez,resp)=>{
       const c=indexedDB.open(NUME_BD,1);
@@ -1030,85 +1056,135 @@ const Depozit = (()=>{
         if(!d.objectStoreNames.contains(MAGAZIE))
           d.createObjectStore(MAGAZIE,{keyPath:'cale'});
       };
-      c.onsuccess=e=>{bd=e.target.result;rez();};
+      c.onblocked=()=>{ console.warn('Depozit: deschiderea e blocată de o altă filă.'); };
+      c.onsuccess=e=>{
+        bd=e.target.result;
+        // dacă o altă filă cere o versiune nouă sau browserul închide conexiunea
+        // (se întâmplă pe mobil după somn), lăsăm conexiunea să cadă curat
+        // și o redeschidem singuri la următoarea operație.
+        bd.onversionchange=()=>{ try{ bd.close(); }catch(_e){} bd=null; };
+        bd.onclose=()=>{ bd=null; };
+        rez();
+      };
       c.onerror=e=>resp(e.target.error);
     });
   }
-  function tx(mod){return bd.transaction(MAGAZIE,mod).objectStore(MAGAZIE);}
-  // `continut` e criptat înainte să atingă discul, și decriptat la citire — transparent pentru restul aplicației
-  function scrie(f){
-    return new Promise((rez,resp)=>{
-      (async()=>{
-        try{
-          const deSalvat=(f && typeof f.continut==='string') ? {...f, continut:await Cripto.encripteaza(f.continut)} : f;
-          const r=tx('readwrite').put(deSalvat);
-          // ținem indexul la zi aici, în inima scrierii: dacă l-am actualiza
-          // din fiecare loc care salvează, sigur am uita unul, iar căutarea
-          // ar rămâne în urmă fără niciun semn.
-          r.onsuccess=()=>{ try{ Cautare.actualizeaza(f); Legaturi.actualizeaza(f); }catch(e){} rez(f); };
+  // rulează o operație pe magazie; dacă conexiunea a murit între timp
+  // (telefon adormit, filă evacuată), redeschidem și mai încercăm O dată.
+  async function ruleaza(mod, actiune){
+    for(let incercare=0; incercare<2; incercare++){
+      try{
+        if(!bd) await deschide();
+        return await new Promise((rez,resp)=>{
+          let r;
+          try{ r=actiune(bd.transaction(MAGAZIE,mod).objectStore(MAGAZIE)); }
+          catch(e){ resp(e); return; }
+          r.onsuccess=()=>rez(r.result);
           r.onerror=()=>resp(r.error);
-        }catch(e){ resp(e); }
+        });
+      }catch(e){
+        const conexiuneMoarta = e && (e.name==='InvalidStateError' || e.name==='TransactionInactiveError' || e.name==='UnknownError');
+        if(incercare===0 && conexiuneMoarta){ try{ if(bd) bd.close(); }catch(_e){} bd=null; continue; }
+        throw e;
+      }
+    }
+  }
+
+  // `continut` e criptat înainte să atingă discul, și decriptat la citire — transparent pentru restul aplicației
+  async function scrie(f){
+    const deSalvat=(f && typeof f.continut==='string') ? {...f, continut:await Cripto.encripteaza(f.continut)} : f;
+    await ruleaza('readwrite', mag=>mag.put(deSalvat));
+    // ținem cache-ul și indexurile la zi aici, în inima scrierii: dacă le-am
+    // actualiza din fiecare loc care salvează, sigur am uita unul, iar
+    // căutarea ar rămâne în urmă fără niciun semn.
+    pastreaza(f);
+    try{ Cautare.actualizeaza(f); Legaturi.actualizeaza(f); }catch(e){}
+    return f;
+  }
+  async function citeste(cale){
+    if(cache.has(cale)) return copie(cache.get(cale));
+    try{
+      const rec=(await ruleaza('readonly', mag=>mag.get(cale)))||null;
+      if(rec && typeof rec.continut==='string') rec.continut=await Cripto.decripteaza(rec.continut);
+      pastreaza(rec);
+      return rec;
+    }catch(e){ return null; }
+  }
+  async function sterge(cale){
+    try{
+      await ruleaza('readwrite', mag=>mag.delete(cale));
+      cache.delete(cale);
+      try{ Cautare.uita(cale); Legaturi.uita(cale); }catch(e){}
+      return true;
+    }catch(e){ return false; }
+  }
+  // încarcă TOT depozitul o singură dată, decriptând în paralel, și umple cache-ul.
+  // Apelurile simultane așteaptă aceeași promisiune — nu pornim două încărcări.
+  async function incarcaTot(){
+    if(cacheComplet) return;
+    if(!incarcare){
+      incarcare=(async()=>{
+        try{
+          const brute=await ruleaza('readonly', mag=>mag.getAll())||[];
+          const lista=await Promise.all(brute.map(async rec=>{
+            if(rec && typeof rec.continut==='string') rec.continut=await Cripto.decripteaza(rec.continut);
+            return rec;
+          }));
+          if(poateMemora()){
+            for(const rec of lista) if(rec) pastreaza(rec);
+            cacheComplet=true;
+          }
+          return lista;
+        }finally{ incarcare=null; }
       })();
-    });
+    }
+    return incarcare;
   }
-  function citeste(cale){
-    return new Promise((rez)=>{
-      const r=tx('readonly').get(cale);
-      r.onsuccess=()=>{
-        (async()=>{
-          const rec=r.result||null;
-          if(rec && typeof rec.continut==='string') rec.continut=await Cripto.decripteaza(rec.continut);
-          rez(rec);
-        })();
-      };
-      r.onerror=()=>rez(null);
-    });
-  }
-  function sterge(cale){return new Promise((rez)=>{const r=tx('readwrite').delete(cale);r.onsuccess=()=>{ try{ Cautare.uita(cale); Legaturi.uita(cale); }catch(e){} rez(true);};r.onerror=()=>rez(false);});}
-  function toate(){
-    return new Promise((rez)=>{
-      const r=tx('readonly').getAll();
-      r.onsuccess=()=>{
-        (async()=>{
-          const lista=(r.result||[]).filter(f=>!f.ascuns);
-          for(const f of lista){ if(typeof f.continut==='string') f.continut=await Cripto.decripteaza(f.continut); }
-          rez(lista);
-        })();
-      };
-      r.onerror=()=>rez([]);
-    });
+  async function toate(){
+    try{
+      if(!cacheComplet){
+        const lista=await incarcaTot();
+        if(!cacheComplet) return (lista||[]).filter(f=>f && !f.ascuns).map(copie);
+      }
+      const rez=[];
+      for(const rec of cache.values()) if(!rec.ascuns) rez.push(copie(rec));
+      return rez;
+    }catch(e){ return []; }
   }
   // ca toate(), dar include și fișierele ascunse (ex: starea sistemului) — folosit la schimbarea parolei master
-  function toateNefiltrate(){
-    return new Promise((rez)=>{
-      const r=tx('readonly').getAll();
-      r.onsuccess=()=>{
-        (async()=>{
-          const lista=r.result||[];
-          for(const f of lista){ if(typeof f.continut==='string') f.continut=await Cripto.decripteaza(f.continut); }
-          rez(lista);
-        })();
-      };
-      r.onerror=()=>rez([]);
-    });
+  async function toateNefiltrate(){
+    try{
+      if(!cacheComplet){
+        const lista=await incarcaTot();
+        if(!cacheComplet) return (lista||[]).filter(Boolean).map(copie);
+      }
+      return Array.from(cache.values(), copie);
+    }catch(e){ return []; }
   }
-  // ca toateNefiltrate(), dar FĂRĂ decriptare — pentru diagnostic (Doctor)
-  function bruteTot(){
-    return new Promise((rez)=>{
-      const r=tx('readonly').getAll();
-      r.onsuccess=()=>rez(r.result||[]);
-      r.onerror=()=>rez([]);
-    });
+  // ca toateNefiltrate(), dar FĂRĂ decriptare și FĂRĂ cache — pentru diagnostic (Doctor)
+  async function bruteTot(){
+    try{ return (await ruleaza('readonly', mag=>mag.getAll()))||[]; }
+    catch(e){ return []; }
   }
   // simplifică un nume: fără diacritice, litere mici — ca să-l găsim ușor
   function simplu(s){return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
-  // găsește un fișier după nume, iertând diacritice și majuscule
+  // găsește un fișier după nume, iertând diacritice și majuscule.
+  // Întâi încercăm calea exactă (O(1) din cache), abia apoi comparăm iertător.
   async function gaseste(nume){
-    const t=await toate();
+    const exact=await citeste(nume);
+    if(exact && !exact.ascuns) return exact;   // fișierele ascunse nu se „găsesc" — ca înainte
     const tinta=simplu(nume);
+    await incarcaTot();
+    if(cacheComplet){
+      for(const rec of cache.values()){
+        if(!rec.ascuns && simplu(rec.cale)===tinta) return copie(rec);
+      }
+      return null;
+    }
+    const t=await toate();
     return t.find(f=>simplu(f.cale)===tinta) || null;
   }
-  return {deschide,scrie,citeste,sterge,toate,toateNefiltrate,bruteTot,gaseste,simplu};
+  return {deschide,scrie,citeste,sterge,toate,toateNefiltrate,bruteTot,gaseste,simplu,golesteCache};
 })();
 
 /* ---------- ESCAPARE: text care ajunge în HTML nu are voie să fie cod ----------
@@ -2021,7 +2097,9 @@ const Cautare = (()=>{
     if(!tipar) return [];
 
     for(const cale of candidati){
-      const f=await Depozit.gaseste(cale);
+      // indexul ține chiar calea fișierului, deci citim direct după cheie —
+      // înainte, fiecare candidat decripta tot depozitul ca să se găsească pe sine
+      const f=await Depozit.citeste(cale);
       if(!f || typeof f.continut!=='string') continue;
       const potriviriAici=potriviriIn(f.continut, tipar, 50)
                             .map(([s,e])=>({poz:s, lung:e-s}));
