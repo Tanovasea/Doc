@@ -2067,6 +2067,176 @@ const Cautare = (()=>{
    Ținem ambele direcții: încotro trimite un fișier, și cine trimite spre el.
    Firele înapoi sunt partea valoroasă — arată legături pe care nu le-ai plănuit.
    Ca și indexul de căutare, harta stă în memorie și se actualizează la scriere. */
+/* ===================== PROBE =====================
+   Aceleași verificări pe care le-aș face pe alt calculator, dar rulate aici,
+   pe telefon, împotriva codului adevărat — nu a unei copii a lui. De-asta au
+   fost scoase din închideri `aparitieLibera`, `alegePereche` și
+   `clasificaLegaturi`: ce nu se poate atinge din afară nu se poate proba.
+   Se cheamă din Terminal:  verifica
+   Grupul „depozit" chiar scrie și șterge un fișier de probă; restul nu
+   ating nimic. */
+const Probe = (()=>{
+  const grupuri=[];
+  function grup(nume, fapte){ grupuri.push({nume, fapte}); }
+
+  // ---- descompunerea unei trimiteri ----
+  grup('Trimiteri', p=>{
+    const d=Legaturi.despicaTinta.bind(Legaturi);
+    p('[[Bunici]] — doar fișier', ()=>{
+      const x=d('Bunici'); return x.eticheta==='' && x.fisier==='Bunici' && x.loc==='';
+    });
+    p('[[Bunici#prispa]] — fișier și ancoră', ()=>{
+      const x=d('Bunici#prispa'); return x.fisier==='Bunici' && x.loc==='prispa';
+    });
+    p('[[vorba mea|Bunici#prispa]] — cu etichetă', ()=>{
+      const x=d('vorba mea|Bunici#prispa');
+      return x.eticheta==='vorba mea' && x.fisier==='Bunici' && x.loc==='prispa';
+    });
+    p('[[#libelula]] — în același fișier', ()=>{
+      const x=d('#libelula'); return x.fisier==='' && x.loc==='libelula' && x.eticheta==='';
+    });
+    p('numele iartă folderul, extensia și diacriticele',
+      ()=>Legaturi.cheie('Jurnal/Bunicĭ.md')===Legaturi.cheie('bunici'));
+  });
+
+  // ---- unde se scrie o legătură ----
+  grup('Scriere', p=>{
+    const t='[[casa|D#loc]] veche, si casa noua, si casa a treia';
+    p('sare peste ce e deja legătură',
+      ()=>aparitieLibera(t,'casa',0)===t.indexOf('casa noua'));
+    p('numără doar aparițiile libere',
+      ()=>aparitieLibera(t,'casa',1)===t.indexOf('casa a treia'));
+    p('fără text ales nu întoarce poziția 0',
+      ()=>aparitieLibera(t,'',0)===-1);
+    p('ce nu există întoarce -1',
+      ()=>aparitieLibera(t,'zăpadă',0)===-1);
+  });
+
+  // ---- perechea, la desfacere ----
+  grup('Perechea', p=>{
+    const c=(eticheta,loc)=>({p:{eticheta, fisier:'A.md', loc}});
+    p('oglinda curată e aleasă dintre mai multe', ()=>{
+      const lista=[c('mar','mere'), c('para','pere')];
+      const ales=alegePereche(lista, {eticheta:'pere', fisier:'B.md', loc:'para'});
+      return ales && ales.p.eticheta==='para';
+    });
+    p('iartă diacriticele și majusculele', ()=>{
+      const ales=alegePereche([c('Prispă','prispa')], {eticheta:'prispa', fisier:'B.md', loc:'prispa'});
+      return !!ales;
+    });
+    p('una singură între două fișiere e perechea, chiar dacă nu se potrivește', ()=>{
+      const ales=alegePereche([c('altceva','nimic')], {eticheta:'x', fisier:'B.md', loc:'y'});
+      return !!ales;
+    });
+    p('între mai multe nepotrivite nu ghicește',
+      ()=>alegePereche([c('a','b'), c('c','d')], {eticheta:'x', fisier:'B.md', loc:'y'})===null);
+  });
+
+  // ---- ce fișiere pot avea legături ----
+  grup('Ce se citește', p=>{
+    const e=Legaturi.eTextDeCitit;
+    p('o însemnare .md se citește',
+      ()=>e({cale:'Jurnal.md', tip:'md', continut:'text [[a|B#c]]'})===true);
+    p('codul unei aplicații NU se citește',
+      ()=>e({cale:'Doc.html', tip:'html', continut:'var x=[["ft","ft"]];'})===false);
+    p('o aplicație fără extensie NU se citește',
+      ()=>e({cale:'wiki', tip:'html', continut:'<!DOCTYPE html><script>[[0,1]]'})===false);
+    p('html fără extensie și fără tip NU se citește',
+      ()=>e({cale:'ceva', tip:'ceva', continut:'<html><body>[[x,y]]'})===false);
+    p('o notă fără extensie se citește',
+      ()=>e({cale:'gand', tip:'gand', continut:'o vorbă cu [[Bunici#prispa]]'})===true);
+    p('copiile de siguranță se sar',
+      ()=>e({cale:'__ver1:x.md', tip:'versiune', continut:'[[a|b]]'})===false);
+  });
+
+  // ---- judecata asupra țesăturii ----
+  grup('Verificare', p=>{
+    const F=(cale,continut)=>({cale, tip:'md', continut});
+    const gol=n=>Object.keys(n).every(k=>n[k].length===0);
+
+    p('perechea sănătoasă nu e raportată', ()=>{
+      const r=clasificaLegaturi([
+        F('Jurnal.md','Am stat pe [[prispa|Bunici.md#Prispa]] la bunici.'),
+        F('Bunici.md','[[Prispa|Jurnal.md#prispa]] era de lemn.')]);
+      return r.total===2 && gol(r.necazuri);
+    });
+    p('legătura chioapă e prinsă', ()=>{
+      const r=clasificaLegaturi([
+        F('Jurnal.md','Am stat pe [[prispa|Bunici.md#Prispa]] la bunici.'),
+        F('Bunici.md','Prispa era de lemn.')]);
+      return r.necazuri.chioapa.length===1 && r.necazuri.ancoraMoarta.length===0;
+    });
+    p('ținta lipsă e prinsă',
+      ()=>clasificaLegaturi([F('J.md','Vezi [[asta|Disparut.md#ceva]].')]).necazuri.tintaLipsa.length===1);
+    p('eticheta goală e prinsă',
+      ()=>clasificaLegaturi([F('M.md','[[|t.md#grâu]] text'), F('t.md','grâu si secara')])
+            .necazuri.etichetaGoala.length===1);
+    p('ancora moartă e prinsă', ()=>{
+      const r=clasificaLegaturi([F('J.md','Vezi [[asta|B.md#libelula]].'), F('B.md','Nimic aici.')]);
+      return r.necazuri.ancoraMoarta.length===1;
+    });
+    p('ancora ținută de eticheta perechii NU e declarată moartă', ()=>{
+      const r=clasificaLegaturi([F('A.md','ceva [[x|B.md#y]] aici'), F('B.md','text [[y|A.md#x]] text')]);
+      return gol(r.necazuri);
+    });
+    p('legătura în același fișier, sănătoasă, e curată',
+      ()=>gol(clasificaLegaturi([F('C.md','Am vazut o [[insecta|#Libelula]]. Libelula statea pe apa.')]).necazuri));
+    p('ancora internă moartă nu se mai găsește pe sine',
+      ()=>clasificaLegaturi([F('D.md','Am vazut [[insecta|#Libelula]] si nimic altceva.')])
+            .necazuri.ancoraMoarta.length===1);
+    p('[[#cuvânt]] sănătoasă e curată',
+      ()=>gol(clasificaLegaturi([F('E.md','[[#libelula]] ... mai jos scrie libelula din nou')]).necazuri));
+    p('trimiterea simplă spre fișier e curată',
+      ()=>gol(clasificaLegaturi([F('F.md','vezi [[Bunici]]'), F('Bunici.md','ceva')]).necazuri));
+    p('două fișiere cu același nume scurt sunt semnalate',
+      ()=>clasificaLegaturi([F('a/Note.md','x'), F('b/Note.md','y')]).necazuri.numeAmbiguu.length===1);
+  });
+
+  // ---- text simplificat ----
+  grup('Potrivirea cuvintelor', p=>{
+    const s=Cautare.simplu;
+    p('diacriticele nu despart', ()=>s('Prispă')===s('prispa'));
+    p('majusculele nu despart', ()=>s('LIBELULĂ')===s('libelulă'));
+    p('cuvinte deosebite rămân deosebite', ()=>s('casă')!==s('masă'));
+  });
+
+  // ---- depozitul, dus-întors ----
+  grup('Depozitul', p=>{
+    p('scrie, citește înapoi și șterge — criptat cu cheia ta', async ()=>{
+      const cale='__proba:'+Date.now();
+      const vorba='prispă cu diacritice și [[paranteze]] · '+Math.random();
+      try{
+        await Depozit.scrie({cale, tip:'proba', ascuns:true, continut:vorba});
+        const inapoi=await Depozit.citeste(cale);
+        return !!inapoi && inapoi.continut===vorba;
+      } finally {
+        try{ await Depozit.sterge(cale); }catch(e){}
+      }
+    });
+  });
+
+  async function ruleaza(peGrup){
+    const raport={grupuri:[], trec:0, cad:0};
+    for(const g of grupuri){
+      const rez={nume:g.nume, fapte:[]};
+      const adauga=(nume, fapta)=>rez.fapte.push({nume, fapta});
+      g.fapte(adauga);
+      for(const f of rez.fapte){
+        try{
+          const r=await f.fapta();
+          f.trece = r===true;
+          if(!f.trece) f.deCe='a întors '+JSON.stringify(r);
+        }catch(e){ f.trece=false; f.deCe=String(e && e.message || e); }
+        if(f.trece) raport.trec++; else raport.cad++;
+      }
+      raport.grupuri.push(rez);
+      if(peGrup) await peGrup(rez);
+    }
+    return raport;
+  }
+  return {ruleaza};
+})();
+
 const Legaturi = (()=>{
   const TIPAR=/\[\[([^\[\]\n]{1,120})\]\]/g;
   let catre=new Map();          // cale -> Set de nume țintă (așa cum sunt scrise)
@@ -2661,6 +2831,118 @@ function tonHex(hex, cant){
 }
 // e poziția asta deja înăuntrul unei legături [[...]]?
 // (verificare simplă și sigură: ne uităm după ultima deschidere înainte de ea)
+/* Prima apariție liberă a unui text: una care nu e deja înăuntrul unei
+   legături, sărind peste primele `inainte` apariții libere.
+   Stă aici, la vedere, nu într-o închidere: e miezul scrierii legăturilor,
+   și ce nu se poate atinge din afară nu se poate proba. */
+/* Care dintre legăturile din fișierul-țintă e perechea celei pe care o
+   desfacem. Trei încercări, de la sigur la îngăduitor:
+   oglinda curată (eticheta ei e locul nostru, locul ei e eticheta noastră),
+   apoi măcar un capăt potrivit — pentru legături mai vechi, scrise altfel —
+   apoi, dacă între cele două fișiere nu e decât una singură, aceea e.
+   Scoasă din închidere anume: e judecata care, greșită, desface altă
+   legătură decât cea cerută. */
+/* Judecă o mulțime de fișiere și spune ce e rupt în țesătura lor.
+   Curată: primește fișiere, întoarce necazuri, nu atinge depozitul și nu
+   desenează nimic. De-aceea se poate proba pe cazuri născocite, cu `verifica`,
+   fără să existe vreun fișier adevărat. */
+function ancoraExista(text, loc){
+  // și în text liber, și în etichete: perechea unei legături înfășoară chiar
+  // cuvântul-ancoră, deci numărând doar textul liber aș raporta moarte
+  // toate ancorele sănătoase
+  if(!loc) return true;
+  const la=a=>Cautare.simplu(a||'');
+  return la(text).indexOf(la(loc))>=0;
+}
+
+function clasificaLegaturi(fisiere){
+  const la=a=>Cautare.simplu(a||'');
+  const toate=(fisiere||[]).filter(f=>f && typeof f.continut==='string');
+  const cheiExistente=new Map();
+  for(const f of toate) cheiExistente.set(Legaturi.cheie(f.cale), f);
+
+  const necazuri={tintaLipsa:[], etichetaGoala:[], ancoraMoarta:[], chioapa:[],
+                  ambigua:[], numeAmbiguu:[]};
+  let total=0;
+
+  // fișiere cu același nume scurt: o trimitere spre ele poate nimeri oriunde
+  const peNume={};
+  for(const f of toate){
+    const k=Legaturi.cheie(f.cale);
+    (peNume[k]=peNume[k]||[]).push(f.cale);
+  }
+  for(const k in peNume) if(peNume[k].length>1)
+    necazuri.numeAmbiguu.push({nume:k, cai:peNume[k]});
+
+  for(const f of toate){
+    const re=new RegExp(Legaturi.TIPAR.source,'g');
+    let m;
+    while((m=re.exec(f.continut))){
+      total++;
+      const brut=m[1];
+      const p=Legaturi.despicaTinta(brut.trim());
+      const unde={cale:f.cale, brut, parti:p};
+
+      if(!p.eticheta && !p.fisier && !p.loc) continue;
+      if(brut.indexOf('|')>=0 && !p.eticheta){ necazuri.etichetaGoala.push(unde); continue; }
+
+      const tinta = p.fisier ? cheiExistente.get(Legaturi.cheie(p.fisier)) : f;
+      if(p.fisier && !tinta){ necazuri.tintaLipsa.push(unde); continue; }
+
+      // La o legătură în același fișier, ancora s-ar găsi pe sine: [[#libelulă]]
+      // conține chiar cuvântul „libelulă". O scoatem din text înainte de a
+      // căuta, altfel n-aș raporta niciodată o ancoră internă moartă.
+      let caut=tinta.continut||'';
+      if(Legaturi.cheie(tinta.cale)===Legaturi.cheie(f.cale))
+        caut=caut.slice(0,m.index)+caut.slice(m.index+m[0].length);
+
+      if(p.loc && !ancoraExista(caut, p.loc)){ necazuri.ancoraMoarta.push(unde); continue; }
+
+      if(p.loc && p.fisier){
+        const re2=new RegExp(Legaturi.TIPAR.source,'g');
+        let m2, gasit=false;
+        while((m2=re2.exec(tinta.continut))){
+          const q=Legaturi.despicaTinta(m2[1].trim());
+          if(!q.fisier || Legaturi.cheie(q.fisier)!==Legaturi.cheie(f.cale)) continue;
+          if(la(q.eticheta)===la(p.loc) || la(q.loc)===la(p.eticheta)){ gasit=true; break; }
+        }
+        if(!gasit){ necazuri.chioapa.push(unde); continue; }
+      }
+
+      if(p.loc){
+        const t=la(caut), c=la(p.loc);
+        let n=0, i=0;
+        while((i=t.indexOf(c,i))>=0){ n++; i+=c.length; if(n>4) break; }
+        if(n>4) necazuri.ambigua.push({...unde, cate:n});
+      }
+    }
+  }
+  return {total, necazuri, cheiExistente};
+}
+
+function alegePereche(candidati, parti){
+  const la=a=>Cautare.simplu(a||'');
+  const oglinda = c => parti.loc && parti.eticheta &&
+                       la(c.p.eticheta)===la(parti.loc) &&
+                       la(c.p.loc)===la(parti.eticheta);
+  const jumatate = c => (parti.loc && la(c.p.eticheta)===la(parti.loc)) ||
+                        (parti.eticheta && la(c.p.loc)===la(parti.eticheta));
+  return candidati.find(oglinda) || candidati.find(jumatate) ||
+         (candidati.length===1 ? candidati[0] : null);
+}
+
+function aparitieLibera(text, cautat, inainte){
+  if(!cautat) return -1;      // fără text, `indexOf` întoarce 0 și scria la începutul fișierului
+  let de=0, sarite=0, p;
+  while((p=text.indexOf(cautat, de))>=0){
+    de=p+cautat.length;
+    if(inLegatura(text, p)) continue;
+    if(sarite>=(inainte||0)) return p;
+    sarite++;
+  }
+  return -1;
+}
+
 function inLegatura(text, poz){
   const deschis=text.lastIndexOf('[[', poz);
   if(deschis<0) return false;
@@ -3067,23 +3349,13 @@ function deschideVizualizareSimpla(f, evidentiaza){
           if(tinta){
             const tt=tinta.continut||'';
             const re=new RegExp(Legaturi.TIPAR.source,'g');
-            const la=a=>Cautare.simplu(a||'');
             const candidati=[]; let mm;
             while((mm=re.exec(tt))){
               const p=Legaturi.despicaTinta(mm[1].trim());
               if(!p.fisier || Legaturi.cheie(p.fisier)!==Legaturi.cheie(f.cale)) continue;
               candidati.push({poz:mm.index, brut:mm[0], p});
             }
-            // oglinda curată: eticheta ei e locul nostru, locul ei e eticheta noastră
-            const oglinda = c => parti.loc && parti.eticheta &&
-                                 la(c.p.eticheta)===la(parti.loc) &&
-                                 la(c.p.loc)===la(parti.eticheta);
-            // pe jumătate: se potrivește măcar un capăt (legături mai vechi,
-            // scrise când perechea se făcea altfel)
-            const jumatate = c => (parti.loc && la(c.p.eticheta)===la(parti.loc)) ||
-                                  (parti.eticheta && la(c.p.loc)===la(parti.eticheta));
-            const ales = candidati.find(oglinda) || candidati.find(jumatate) ||
-                         (candidati.length===1 ? candidati[0] : null);
+            const ales = alegePereche(candidati, parti);
             if(ales){
               const gasitText=ales.p.eticheta||ales.p.fisier;
               tinta.continut=tt.slice(0,ales.poz)+gasitText+tt.slice(ales.poz+ales.brut.length);
@@ -3533,20 +3805,6 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
     // scrie legătura în text, exact peste bucata aleasă.
     // `tintaFis` e înregistrarea fișierului-țintă, ca să putem lega și înapoi.
-    // prima apariție liberă a unui text (una care nu e deja înăuntrul unei
-    // legături), sărind peste primele `inainte` apariții libere
-    function aparitieLibera(text, cautat, inainte){
-      if(!cautat) return -1;          // fără text, `indexOf` întoarce 0 și scria la începutul fișierului
-      let de=0, sarite=0, p;
-      while((p=text.indexOf(cautat, de))>=0){
-        de=p+cautat.length;
-        if(inLegatura(text, p)) continue;
-        if(sarite>=(inainte||0)) return p;
-        sarite++;
-      }
-      return -1;
-    }
-
     async function scrieLegatura(sel, tinta, loc, tintaFis, pozAleasa){
       if(!sel || !sel.text){ instiintare('S-a pierdut cuvântul ales. Ține apăsat din nou pe el.'); return; }
       const inlocuire='[['+sel.text+'|'+tinta+(loc?('#'+loc):'')+']]';
@@ -4631,86 +4889,11 @@ Nucleu.inregistreaza({
        Regula de aici e ca la Rămășițe: reparăm doar ce se poate dovedi. Ținta
        ștearsă n-o dregem singuri — ori desfaci legătura, ori o îndrepți, și
        amândouă sunt hotărâri de-ale tale. */
-    const laSimplu=a=>Cautare.simplu(a||'');
-
-    // apare cuvântul în text? și ca text liber, și ca etichetă de legătură —
-    // perechea unei legături înfășoară chiar cuvântul-ancoră, deci dacă am
-    // număra numai textul liber aș raporta moarte toate ancorele sănătoase
-    function ancoraExista(text, loc){
-      if(!loc) return true;
-      const t=laSimplu(text||''), c=laSimplu(loc);
-      return t.indexOf(c)>=0;
-    }
-
     async function adunaLegaturi(){
       // aceeași regulă ca la indexare: numai text scris de tine, nu cod
       const toate=(await Depozit.toate()).filter(f=>Legaturi.eTextDeCitit(f));
       const dupaCale={}; for(const f of toate) dupaCale[f.cale]=f;
-      const cheiExistente=new Map();
-      for(const f of toate) cheiExistente.set(Legaturi.cheie(f.cale), f);
-
-      const necazuri={tintaLipsa:[], etichetaGoala:[], ancoraMoarta:[], chioapa:[],
-                      ambigua:[], numeAmbiguu:[]};
-      let total=0;
-
-      // fișiere cu același nume de bază: o trimitere spre ele poate nimeri oriunde
-      const peNume={};
-      for(const f of toate){
-        const k=Legaturi.cheie(f.cale);
-        (peNume[k]=peNume[k]||[]).push(f.cale);
-      }
-      for(const k in peNume) if(peNume[k].length>1)
-        necazuri.numeAmbiguu.push({nume:k, cai:peNume[k]});
-
-      for(const f of toate){
-        const re=new RegExp(Legaturi.TIPAR.source,'g');
-        let m;
-        while((m=re.exec(f.continut))){
-          total++;
-          const brut=m[1];
-          const p=Legaturi.despicaTinta(brut.trim());
-          const unde={cale:f.cale, brut, parti:p};
-
-          if(!p.eticheta && !p.fisier && !p.loc) continue;
-          if(!p.eticheta && p.fisier && !p.loc) { /* [[Fișier]] simplu, e în regulă */ }
-
-          if(brut.indexOf('|')>=0 && !p.eticheta){ necazuri.etichetaGoala.push(unde); continue; }
-
-          // ținta: alt fișier, sau chiar acesta
-          const tinta = p.fisier ? cheiExistente.get(Legaturi.cheie(p.fisier)) : f;
-          if(p.fisier && !tinta){ necazuri.tintaLipsa.push(unde); continue; }
-
-          // La o legătură în același fișier, ancora s-ar găsi pe sine: [[#libelulă]]
-          // conține chiar cuvântul „libelulă". Scoatem legătura din text înainte
-          // de a căuta, altfel n-aș raporta niciodată o ancoră internă moartă.
-          let caut=tinta.continut||'';
-          if(Legaturi.cheie(tinta.cale)===Legaturi.cheie(f.cale))
-            caut=caut.slice(0,m.index)+caut.slice(m.index+m[0].length);
-
-          if(p.loc && !ancoraExista(caut, p.loc)){ necazuri.ancoraMoarta.push(unde); continue; }
-
-          if(p.loc && p.fisier){
-            // perechea: o legătură din țintă care trimite înapoi aici
-            const re2=new RegExp(Legaturi.TIPAR.source,'g');
-            let m2, gasit=false;
-            while((m2=re2.exec(tinta.continut))){
-              const q=Legaturi.despicaTinta(m2[1].trim());
-              if(!q.fisier || Legaturi.cheie(q.fisier)!==Legaturi.cheie(f.cale)) continue;
-              if(laSimplu(q.eticheta)===laSimplu(p.loc) || laSimplu(q.loc)===laSimplu(p.eticheta)){ gasit=true; break; }
-            }
-            if(!gasit){ necazuri.chioapa.push(unde); continue; }
-          }
-
-          // ancoră care apare de multe ori: săritura merge la prima
-          if(p.loc){
-            const t=laSimplu(caut), c=laSimplu(p.loc);
-            let n=0, i=0;
-            while((i=t.indexOf(c,i))>=0){ n++; i+=c.length; if(n>4) break; }
-            if(n>4) necazuri.ambigua.push({...unde, cate:n});
-          }
-        }
-      }
-      return {total, necazuri, dupaCale, cheiExistente};
+      return {...clasificaLegaturi(toate), dupaCale};
     }
 
     // înlocuiește o singură legătură, exact acolo unde e scrisă
@@ -5251,6 +5434,7 @@ Nucleu.inregistreaza({
         randComanda('proprietari','ce aplicație ține ce fișier');
         randComanda('index','reconstruiește indexul de căutare');
         randComanda('legaturi [nume]','ce trimite unde, sau trimiterile fără fișier');
+        randComanda('verifica','probează Logos-ul pe el însuși; spune ce s-a rupt');
         randComanda('migrare','starea recriptării după schimbarea parolei');
         randComanda('elibereaza <nume>','scoate fișierul din grija unei aplicații');
         randComanda('recupereaza <nume>','adu înapoi versiunea de dinainte');
@@ -5546,6 +5730,25 @@ Nucleu.inregistreaza({
       },
 
       // ---- LEGĂTURI ----
+      async verifica(){
+        scrie('Probez Logos-ul... (nu se atinge nimic de-al tău, în afară de un fișier de probă, șters imediat)','stins');
+        const raport=await Probe.ruleaza(async g=>{
+          const cad=g.fapte.filter(x=>!x.trece).length;
+          scrie('');
+          scrie((cad?'✗ ':'✓ ')+g.nume+'  ·  '+(g.fapte.length-cad)+'/'+g.fapte.length, cad?'err':'cald');
+          for(const f of g.fapte)
+            if(!f.trece) scrie('    ✗ '+f.nume+(f.deCe?'  —  '+f.deCe:''),'err');
+        });
+        scrie('');
+        if(raport.cad){
+          scrie(raport.cad+' probe căzute din '+(raport.trec+raport.cad)+'.','err');
+          scrie('Ce a căzut arată unde s-a rupt ceva. Spune-i cuiva care poate citi codul.','stins');
+        } else {
+          scrie('✓ Toate cele '+raport.trec+' de probe trec.','cald');
+          scrie('Miezul face ce spune: descompunerea trimiterilor, scrierea legăturilor,','stins');
+          scrie('găsirea perechii, judecata țesăturii, și depozitul dus-întors.','stins');
+        }
+      },
       async legaturi(arg){
         if(!Legaturi.esteGata()) await Legaturi.construieste();
         const nume=(arg||'').trim();
