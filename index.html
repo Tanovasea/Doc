@@ -4133,6 +4133,7 @@ Nucleu.inregistreaza({
 
         // ---- spațiu ----
         html+='<div class="u-rand"><label>Spațiu folosit</label><div class="u-info" style="text-align:left;padding:6px 2px">';
+        const totalOrigine = est ? (est.usage||0) : null;
         if(est){
           const used=est.usage||0, quota=est.quota||0;
           const pct=quota?Math.round(used/quota*100):0;
@@ -4186,6 +4187,17 @@ Nucleu.inregistreaza({
               (raport?' <span style="color:var(--text-stins)">(×'+raport.toFixed(2)+')</span>':'')+'</div>';
         html+='<div style="color:var(--text-stins)">Copia aplicației: '+fmtOcteti(copiiApp)+
               '  ·  Cămări oaspeți: '+fmtOcteti(camari)+'</div>';
+        // Browserul socotește pe origine, nu pe aplicație. Totalul de sus
+        // cuprinde și bazele altor aplicații — fără rândul ăsta, rămâne o
+        // diferență mare pe care Doctorul o arăta fără s-o lămurească.
+        if(totalOrigine!=null){
+          const alAltora=Math.max(0, totalOrigine-stocat-copiiApp-camari);
+          html+='<div style="margin-top:6px;padding-top:6px;border-top:1px solid #21262d">'+
+                'Browserul socotește <b>'+fmtOcteti(totalOrigine)+'</b> pe toată originea.</div>';
+          if(alAltora>totalOrigine*0.05)
+            html+='<div style="color:var(--accent-cald, #d29922)">Din care '+fmtOcteti(alAltora)+
+                  ' nu sunt ale Logos-ului — stau în bazele de la „Rămășițe".</div>';
+        }
         html+='</div></div>';
 
         // ---- cele mai mari ----
@@ -4268,6 +4280,46 @@ Nucleu.inregistreaza({
           }
           bd.close();
           gata({magazii, total});
+        };
+      });
+    }
+
+    // Cât ocupă o bază străină. Numărul de înregistrări nu spune nimic: 40 de
+    // rânduri pot fi 40 de octeți sau 30 de megaocteți. Măsurăm doar la cerere,
+    // fiindcă înseamnă citit tot ce e înăuntru.
+    function masoaraBaza(nume){
+      return new Promise(gata=>{
+        let cerere;
+        try{ cerere=indexedDB.open(nume); }catch(e){ gata(null); return; }
+        cerere.onerror=()=>gata(null);
+        cerere.onblocked=()=>gata(null);
+        cerere.onsuccess=async ev=>{
+          const bd=ev.target.result;
+          let total=0;
+          try{
+            for(const m of Array.from(bd.objectStoreNames)){
+              total+=await new Promise(r=>{
+                let s=0;
+                try{
+                  const c=bd.transaction(m,'readonly').objectStore(m).openCursor();
+                  c.onsuccess=e2=>{
+                    const cur=e2.target.result;
+                    if(!cur){ r(s); return; }
+                    try{
+                      const v=cur.value;
+                      if(v instanceof Blob) s+=v.size;
+                      else if(v && v.byteLength) s+=v.byteLength;
+                      else s+=new Blob([JSON.stringify(v)]).size;
+                    }catch(e3){}
+                    cur.continue();
+                  };
+                  c.onerror=()=>r(s);
+                }catch(e4){ r(0); }
+              });
+            }
+          }catch(e){}
+          bd.close();
+          gata(total);
         };
       });
     }
@@ -4453,6 +4505,20 @@ Nucleu.inregistreaza({
         stanga.innerHTML='<div style="font-size:.9rem">'+escHtml(g.nume)+'</div>'+
                          '<div style="font-size:.78rem;color:var(--text-stins);margin-top:2px">'+escHtml(g.detaliu)+'</div>';
         r.appendChild(stanga);
+        if(strain && g.fel==='baza'){
+          const m=document.createElement('button');
+          m.textContent='Cât ocupă?';
+          m.style.cssText='background:transparent;border:1px solid var(--text-stins, #8b949e);'+
+                          'color:var(--text-stins, #8b949e);border-radius:8px;padding:7px 11px;font-size:.8rem;flex:none';
+          m.addEventListener('click', async ()=>{
+            m.disabled=true; m.textContent='…';
+            const oct=await masoaraBaza(g.nume);
+            const jos=stanga.lastElementChild;
+            if(jos) jos.textContent = g.detaliu + (oct==null?' · n-am putut măsura':' · '+octFrumos(oct));
+            m.remove();
+          });
+          r.appendChild(m);
+        }
         const b=document.createElement('button');
         b.textContent='Șterge';
         const culoare = strain ? 'var(--text-stins, #8b949e)' : 'var(--rosu, #f85149)';
