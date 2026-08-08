@@ -6177,8 +6177,11 @@ Nucleu.inregistreaza({
         const d=new Date();
         const zile=['duminică','luni','marți','miercuri','joi','vineri','sâmbătă'];
         const luni=['ian','feb','mar','apr','mai','iun','iul','aug','sep','oct','noi','dec'];
-        const cand=zile[d.getDay()]+', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+', '+String(d.getDate()).padStart(2,'0')+' '+luni[d.getMonth()]+' '+d.getFullYear();
-        f.continut += '\n- ['+cand+'] '+arg.trim();
+        const ziua=zile[d.getDay()]+', '+String(d.getDate()).padStart(2,'0')+' '+luni[d.getMonth()]+' '+d.getFullYear();
+        const ora=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+        // capul de zi apare o singură dată; gândurile din aceeași zi au doar ora
+        if(!f.continut.includes('## '+ziua)){ f.continut += '\n\n## '+ziua; }
+        f.continut += '\n- ['+ora+'] '+arg.trim();
         await Depozit.scrie(f);
         scrie('Prins. (în ganduri.md)','cald');
       },
