@@ -5438,10 +5438,6 @@ Nucleu.inregistreaza({
       }catch(e){}
     }
 
-    scrie('LOGOS · terminal','info');
-    scrie('Sistemul tău, comandat prin cuvinte.','stins');
-    scrie('Scrie  ajutor  ca să vezi ce poți face.','cald');
-    scrie('');
 
     // ---- ajutor pentru găsirea fișierelor (diacritice + folder) ----
     async function gasesteFis(nume){ return await Depozit.gaseste(nume); }
@@ -6179,7 +6175,9 @@ Nucleu.inregistreaza({
         let f=await Depozit.gaseste('ganduri.md');
         if(!f){ f={cale:'ganduri.md',tip:'md',creat:Date.now(),continut:'# Gânduri\n'}; }
         const d=new Date();
-        const cand=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+        const zile=['duminică','luni','marți','miercuri','joi','vineri','sâmbătă'];
+        const luni=['ian','feb','mar','apr','mai','iun','iul','aug','sep','oct','noi','dec'];
+        const cand=zile[d.getDay()]+', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+', '+String(d.getDate()).padStart(2,'0')+' '+luni[d.getMonth()]+' '+d.getFullYear();
         f.continut += '\n- ['+cand+'] '+arg.trim();
         await Depozit.scrie(f);
         scrie('Prins. (în ganduri.md)','cald');
