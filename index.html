@@ -587,7 +587,9 @@
   }
 </style>
 </head>
-<body>
+<!-- pornim „Acasă": în mod birou, stratul de ferestre (gol) nu are voie să
+     acopere desktopul înainte să se deschidă ceva. Prima fereastră o scoate. -->
+<body class="acasa">
 
 <div id="ecran-lacat">
   <div class="lac-astru"></div>
@@ -1376,6 +1378,10 @@ function inchideFereastraId(id){
   } else {
     activaId=null;
     randeazaComutator();
+    // ultima fereastră s-a dus → înapoi la Acasă. Fără asta, în mod birou
+    // stratul de ferestre (gol, dar cu fundal) acoperea desktopul, iar
+    // desktopul avea pointer-events:none — de aici „blocajul" de pe iPad.
+    document.body.classList.add('acasa');
     Memorie.salveaza({ultimaApp:null, ctx:null, deschise:[]});
   }
   if(birou){ reseteazaLatimi(); asazaManere(); }
@@ -1488,6 +1494,7 @@ async function deschideMeniuStart(){
     <div class="ms-linie"></div>
     <div class="ms-r" data-act="nou"><span class="ms-ic">＋</span><span>Fișier nou</span><span class="ms-scurt">Ctrl+N</span></div>
     <div class="ms-r" data-act="acasa"><span class="ms-ic">⌂</span><span>Ecranul de acasă</span><span class="ms-scurt">Esc</span></div>
+    <div class="ms-r" data-act="mod-ferestre"><span class="ms-ic">⊞</span><span class="mf-eticheta">Ferestre alăturate: ${etichetaModFerestre()}</span></div>
     ${ferestreDeschise.length?'<div class="ms-r rosu" data-act="inchide-tot"><span class="ms-ic">✕</span><span>Închide toate ferestrele</span></div>':''}
     <div class="ms-linie"></div>
     <div class="ms-r" data-act="blocheaza"><span class="ms-ic">🔒</span><span>Blochează acum</span></div>
@@ -1503,6 +1510,18 @@ async function deschideMeniuStart(){
   m.querySelectorAll('.ms-r').forEach(r=>{
     r.addEventListener('click',async()=>{
       const app=r.dataset.app, fis=r.dataset.fis, act=r.dataset.act;
+      // setarea de ferestre ciclează pe loc, fără să închidă meniul:
+      // vezi imediat cum se rearanjează ecranul în spate.
+      if(act==='mod-ferestre'){
+        const ordine=['auto','birou','telefon'];
+        const acum=(Memorie.ia().modFerestre)||'auto';
+        const urm=ordine[(ordine.indexOf(acum)+1)%ordine.length];
+        Memorie.salveaza({modFerestre:urm});
+        actualizeazaMod(); aplicaLatimiSalvate();
+        const et=r.querySelector('.mf-eticheta');
+        if(et) et.textContent='Ferestre alăturate: '+etichetaModFerestre();
+        return;
+      }
       m.remove();
       if(app){ Nucleu.lanseaza(app); }
       else if(fis){ const f=await Depozit.gaseste(fis); if(f) deschideCuApp(f); }
@@ -1517,12 +1536,14 @@ async function deschideMeniuStart(){
     });
   });
 
-  // clic în afară sau Esc → închide
+  // clic/atingere în afară sau Esc → închide.
+  // `pointerdown`, nu `click`: Safari pe iOS nu declanșează click pe document
+  // când atingi zone neinteractive (fără cursor:pointer) — meniul rămânea deschis.
   setTimeout(()=>{
     const inchide=ev=>{
-      if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('click',inchide); }
+      if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('pointerdown',inchide); }
     };
-    document.addEventListener('click',inchide);
+    document.addEventListener('pointerdown',inchide);
   },10);
 }
 // fișier nou (folosit și de Ctrl+N și de meniu)
@@ -6463,14 +6484,27 @@ function areMouse(){
         && window.matchMedia('(hover: hover)').matches;
   }catch(e){ return true; }
 }
+// eticheta pentru meniul Start (declarată cu `function`, deci vizibilă și mai sus)
+function etichetaModFerestre(){
+  const pref=(Memorie.ia().modFerestre)||'auto';
+  return pref==='birou' ? 'Mereu' : pref==='telefon' ? 'Niciodată' : 'Automat';
+}
 function actualizeazaMod(){
   const eraBirou = document.body.classList.contains('birou');
-  // ferestre alăturate pe orice ecran lat (laptop ȘI tabletă)
-  // Modul birou (ferestre alăturate) cere ecran lat ȘI mouse adevărat.
-  // Pe iPad, cu degetul, modul birou se blochează pe jumătate — nu am putut
-  // găsi de ce (Safari se poartă altfel). Așa că acolo rămâne modul telefon,
-  // unde totul merge. Cu o tastatură+trackpad, iPad-ul va primi modul birou singur.
-  const birou = window.innerWidth >= 900 && areMouse();
+  // Ferestre alăturate pe orice ecran lat: laptop ȘI tabletă, mouse SAU deget.
+  // „Blocajul pe jumătate" de pe iPad nu era de la atingere, ci două bube:
+  //   1) când închideai ultima fereastră, clasa `acasa` nu se punea înapoi,
+  //      deci stratul de ferestre (cu fundalul lui) acoperea desktopul, iar
+  //      desktopul avea pointer-events:none — ecran gri, nimic nu răspundea;
+  //   2) meniul Start se închidea la „click" pe document, dar Safari pe iOS
+  //      nu declanșează click pe zonele neinteractive — meniul rămânea agățat.
+  // Ambele sunt reparate mai jos, așa că iPad-ul primește biroul cu degetul.
+  // Preferința utilizatorului (din meniul Start): auto / birou / telefon.
+  const pref = (Memorie.ia().modFerestre)||'auto';
+  let birou;
+  if(pref==='birou')        birou = window.innerWidth >= 600;  // „Mereu": și tabletă în portret
+  else if(pref==='telefon') birou = false;                     // „Niciodată"
+  else                      birou = window.innerWidth >= 900;  // „Automat": laptop + iPad în peisaj
   document.body.classList.toggle('birou', birou);
   // pe atingere marcăm separat, ca să nu punem reguli de mouse
   document.body.classList.toggle('deget', !areMouse());
@@ -6526,16 +6560,24 @@ function facRedimensibil(maner, stanga, dreapta){
       maner.classList.remove('activ'); voal.remove();
       window.removeEventListener('pointermove',onMove);
       window.removeEventListener('pointerup',onUp);
+      window.removeEventListener('pointercancel',onUp);
       window.removeEventListener('mousemove',onMove);
       window.removeEventListener('mouseup',onUp);
       salveazaLatimi();   // ține minte cum ai împărțit
     };
     window.addEventListener('pointermove',onMove);
     window.addEventListener('pointerup',onUp);
+    window.addEventListener('pointercancel',onUp);   // iOS poate anula atingerea (gest de sistem)
     window.addEventListener('mousemove',onMove);
     window.addEventListener('mouseup',onUp);
   }
-  maner.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); porneste(e.clientX); });
+  maner.addEventListener('pointerdown',e=>{
+    e.preventDefault(); e.stopPropagation();
+    // legăm degetul de mâner: chiar dacă alunecă peste fereastra vecină,
+    // mișcările continuă să vină aici, nu se pierd (important pe iPad)
+    try{ maner.setPointerCapture(e.pointerId); }catch(_){}
+    porneste(e.clientX);
+  });
   maner.addEventListener('mousedown',e=>{ e.preventDefault(); e.stopPropagation(); porneste(e.clientX); });
 }
 // ține minte lățimile (după appId, ca să le regăsească la redeschidere)
