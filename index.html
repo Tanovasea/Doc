@@ -1552,7 +1552,9 @@ async function deschideMeniuStart(){
   // când atingi zone neinteractive (fără cursor:pointer) — meniul rămânea deschis.
   setTimeout(()=>{
     const inchide=ev=>{
-      if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('pointerdown',inchide); }
+      if(m.contains(ev.target)) return;
+      if(ev.target && ev.target.closest && ev.target.closest('#marca')) return;  // comutarea o face LogOS însuși
+      m.remove(); document.removeEventListener('pointerdown',inchide);
     };
     document.addEventListener('pointerdown',inchide);
   },10);
@@ -1598,10 +1600,22 @@ function laAtingere(el, fn){
     pid=null;
     if(Date.now()-t0>480) return;                                       // apăsare lungă
     if(Math.abs(e.clientX-x0)>14 || Math.abs(e.clientY-y0)>14) return;  // a fost derulare
+    __clipaAtingerii=Date.now();
     fn(e);
   });
   el.addEventListener('pointercancel', ()=>{ pid=null; });  // browserul a preluat gestul (derulare)
 }
+/* CLICK-UL „FANTOMĂ": după ce pointerup-ul nostru a lucrat (a închis meniul
+   Start, a deschis o fereastră), browserul mai trimite și click-ul sintetic al
+   ACELEIAȘI atingeri — iar el aterizează pe ce a ajuns între timp sub deget.
+   Pe Android: atingeai o aplicație în meniul Start, meniul dispărea, iar
+   click-ul întârziat cădea pe prima iconiță din grila de dedesubt — așa se
+   deschidea Fișiere „de la sine". Orice click venit imediat după o activare
+   laAtingere e ecoul ei, nu o intenție: îl înghițim. */
+let __clipaAtingerii=0;
+document.addEventListener('click', e=>{
+  if(Date.now()-__clipaAtingerii<400){ e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 /* ============================================================
    CONTRACTUL unei aplicații:
@@ -6478,7 +6492,7 @@ Acesta e un fișier **Markdown**. Tap pe el în Fișiere și se deschide
   for(const app of Nucleu.lista()){
     const ic=document.createElement('div'); ic.className='ic';
     ic.innerHTML=`<div class="glif">${app.iconita}</div><div class="nume">${app.nume}</div>`;
-    ic.addEventListener('click',()=>Nucleu.lanseaza(app.id));
+    laAtingere(ic,()=>Nucleu.lanseaza(app.id));
     grila.appendChild(ic);
   }
 
@@ -6486,7 +6500,7 @@ Acesta e un fișier **Markdown**. Tap pe el în Fișiere și se deschide
     'Sistemul <b>Logos</b> e pornit. Totul aici trăiește în telefonul tău, offline.<br>Atinge o aplicație, sau deschide <b>Terminalul</b> și scrie <b>ajutor</b>.';
 
   // LogOS (stânga sus) = Acasă
-  document.getElementById('marca').addEventListener('click',e=>{ e.stopPropagation(); comutaMeniuStart(); });
+  laAtingere(document.getElementById('marca'), e=>{ e.stopPropagation(); comutaMeniuStart(); });
   document.getElementById('marca').style.cursor='pointer';
 
   // ---- MEMORIA: Logos te primește înapoi unde ai rămas ----
@@ -6790,6 +6804,28 @@ window.addEventListener('keydown',e=>{
     window.addEventListener('resize', amanat);
     window.addEventListener('orientationchange', ()=>setTimeout(laLoc, 280));
     document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) amanat(); });
+  })();
+
+  // ---- TASTATURA PE iOS: pagina nu se strânge singură ----
+  // Pe Android, browserul micșorează pagina când urcă tastatura, așa că rândul
+  // de scris rămâne vizibil. Pe iOS/iPad tastatura doar ACOPERĂ pagina: scriai
+  // în Terminal și nu vedeai ce scrii, fiindcă rândul rămânea sub ea.
+  // Măsurăm cât din pagină e acoperit (visualViewport) și ridicăm marginea de
+  // jos a stratului de ferestre exact cu atât. Pe Android măsura iese ~0,
+  // deci nu schimbă nimic.
+  (function(){
+    const vv=window.visualViewport;
+    if(!vv) return;
+    let ultim=-1;
+    function strange(){
+      const acoperit=Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      if(acoperit===ultim) return;
+      ultim=acoperit;
+      stratFerestre.style.bottom = acoperit>0 ? (acoperit+'px') : '';
+    }
+    vv.addEventListener('resize', strange);
+    vv.addEventListener('scroll', strange);
+    window.addEventListener('orientationchange', ()=>setTimeout(strange, 320));
   })();
 
   // Harta legăturilor, construită din vreme și în tăcere: altfel primul fișier

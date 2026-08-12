@@ -8,7 +8,7 @@
    la activare șterge tot ce e din versiunile trecute.
    ============================================================ */
 
-const VERSIUNE = 'logos-2026-08-12-ip2';   // ← schimbă asta la fiecare încărcare
+const VERSIUNE = 'logos-2026-08-13-ip3';   // ← schimbă asta la fiecare încărcare
 
 const FISIERE = [
   './',
