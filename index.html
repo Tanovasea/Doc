@@ -1630,6 +1630,71 @@ document.addEventListener('click', e=>{
      o funcție de curățenie (oprește timere etc.)
    ============================================================ */
 
+/* ---------- poză pe tot ecranul, cu zoom ---------- */
+// Ciupire cu două degete, tragere cu unul, dublă atingere = mărește/revine.
+// Fundal opac, ca poza să nu se piardă peste text.
+function aratoPozaMare(src){
+  const strat=document.createElement('div');
+  strat.style.cssText='position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.94);'+
+    'display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none';
+  const im=document.createElement('img');
+  im.src=src;
+  im.style.cssText='max-width:100%;max-height:100%;transform-origin:center center;will-change:transform';
+  const x=document.createElement('div');
+  x.textContent='✕';
+  x.style.cssText='position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);right:14px;'+
+    'width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;'+
+    'display:flex;align-items:center;justify-content:center;font-size:1.1rem;cursor:pointer';
+  strat.appendChild(im); strat.appendChild(x);
+  document.body.appendChild(strat);
+
+  let sc=1, tx=0, ty=0;
+  const pune=()=>{ im.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`; };
+  const inchide=()=>{ strat.remove(); document.removeEventListener('keydown', laTasta); };
+  const laTasta=e=>{ if(e.key==='Escape') inchide(); };
+  document.addEventListener('keydown', laTasta);
+  laAtingere(x, inchide);
+
+  const degete=new Map();
+  let distInit=0, scInit=1, ultimX=0, ultimY=0, ultimaAtingere=0;
+  strat.addEventListener('pointerdown',e=>{
+    if(e.target===x) return;
+    degete.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    try{ strat.setPointerCapture(e.pointerId); }catch(_){}
+    if(degete.size===2){
+      const [a,b]=[...degete.values()];
+      distInit=Math.hypot(a.x-b.x,a.y-b.y); scInit=sc;
+    } else { ultimX=e.clientX; ultimY=e.clientY; }
+  });
+  strat.addEventListener('pointermove',e=>{
+    if(!degete.has(e.pointerId)) return;
+    degete.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(degete.size===2){
+      const [a,b]=[...degete.values()];
+      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      if(distInit>0){ sc=Math.min(8,Math.max(1,scInit*(d/distInit))); pune(); }
+    } else if(sc>1){
+      tx+=e.clientX-ultimX; ty+=e.clientY-ultimY;
+      ultimX=e.clientX; ultimY=e.clientY; pune();
+    }
+  });
+  const ridica=e=>{
+    degete.delete(e.pointerId);
+    if(degete.size<2) distInit=0;
+    if(degete.size===0){
+      const acum=Date.now();
+      if(acum-ultimaAtingere<300){          // dublă atingere
+        if(sc>1){ sc=1; tx=ty=0; } else sc=2.5;
+        pune(); ultimaAtingere=0;
+      } else ultimaAtingere=acum;
+      if(sc<=1){ tx=ty=0; pune(); }         // revenit la mărimea normală → centrat
+    }
+  };
+  strat.addEventListener('pointerup',ridica);
+  strat.addEventListener('pointercancel',ridica);
+  return strat;
+}
+
 /* ---------- mini-Markdown pentru cititor ---------- */
 function md2html(md){
   const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -3174,6 +3239,29 @@ function deschideVizualizareSimpla(f, evidentiaza){
 
     function md2htmlLocal(md){
       const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      // ---- imagini: ![descriere](sursă) ----
+      // Randăm <img> ÎN Logos, nu într-un iframe, deci sursa trece printr-un
+      // filtru strict: doar poze rasterizate încorporate (data:image/png|jpeg|
+      // gif|webp|bmp) sau adrese http(s) curate. Refuzăm intenționat SVG-ul,
+      // fiindcă e un document, nu o poză, și nu vreau surprize; și refuzăm orice
+      // altceva (javascript:, data:text/html …). Ce nu trece rămâne text simplu.
+      const sursaSigura=u=>{
+        u=(u||'').trim();
+        if(/^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,[A-Za-z0-9+/=\s]+$/i.test(u)) return u.replace(/\s+/g,'');
+        if(/^https?:\/\/[^\s"'<>]+$/i.test(u)) return u;
+        return null;
+      };
+      const cuImagini=(text,inainte)=>{
+        // text vine DEJA escapat; scoatem imaginile și le punem înapoi ca <img>
+        return text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,(tot,alt,src)=>{
+          // alt/src au trecut prin esc, deci &amp; trebuie desfăcut la loc în adresă
+          const curat=sursaSigura(src.replace(/&amp;/g,'&'));
+          if(!curat) return tot;                       // suspect → rămâne text
+          return '<img src="'+curat.replace(/"/g,'&quot;')+'" alt="'+alt+'" '+
+                 'style="max-width:100%;height:auto;border-radius:10px;display:block;margin:10px auto;cursor:zoom-in" '+
+                 'data-poza="1">';
+        });
+      };
       return md.split('\n').map(l=>{
         let t=l.trim();
         if(t.startsWith('## '))return '<h2>'+esc(t.slice(3))+'</h2>';
@@ -3181,7 +3269,13 @@ function deschideVizualizareSimpla(f, evidentiaza){
         if(t.startsWith('> '))return '<blockquote>'+esc(t.slice(2))+'</blockquote>';
         if(/^[-*+]\s/.test(t))return '<li>'+esc(t.replace(/^[-*+]\s/,''))+'</li>';
         if(t==='')return '';
-        return '<p>'+esc(t).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/`(.+?)`/g,'<code>$1</code>')+'</p>';
+        // o linie care e DOAR o imagine nu se împachetează în <p>
+        const doarPoza=/^!\[[^\]]*\]\([^)]+\)$/.test(t);
+        const corp=cuImagini(esc(t),t)
+          .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+          .replace(/\*(.+?)\*/g,'<em>$1</em>')
+          .replace(/`(.+?)`/g,'<code>$1</code>');
+        return doarPoza ? corp : '<p>'+corp+'</p>';
       }).join('');
     }
     // salvare automată (ca în modelul tău: scrii, se salvează singur)
@@ -3312,6 +3406,10 @@ function deschideVizualizareSimpla(f, evidentiaza){
         if(cuFocus) setTimeout(()=>ta.focus(),150);
       } else if(eMd){
         corpV.innerHTML='<div class="vd">'+md2htmlLocal(f.continut||'')+'</div>';
+        // atingi poza → o vezi mare, pe tot ecranul (ca în aplicația de documente)
+        corpV.querySelectorAll('img[data-poza]').forEach(im=>{
+          laAtingere(im, ()=>aratoPozaMare(im.src));
+        });
         coloreazaMd();
       } else {
         corpV.innerHTML='<pre style="white-space:pre-wrap;font-family:inherit;margin:0">'+(f.continut||'(gol)').replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</pre>';
