@@ -1614,6 +1614,12 @@ function laAtingere(el, fn){
    laAtingere e ecoul ei, nu o intenție: îl înghițim. */
 let __clipaAtingerii=0;
 document.addEventListener('click', e=>{
+  // Numai ecourile browserului, nu și click-urile pe care le pornim NOI din cod.
+  // `alegator.click()` (butonul „Adaugă o aplicație") produce un click cu
+  // isTrusted=false; dacă îl anulam aici, selectorul de fișiere nu se mai
+  // deschidea deloc — nu se mai puteau adăuga aplicații. Ecoul adevărat al
+  // atingerii vine de la browser, deci e mereu isTrusted=true.
+  if(!e.isTrusted) return;
   if(Date.now()-__clipaAtingerii<400){ e.stopPropagation(); e.preventDefault(); }
 }, true);
 
