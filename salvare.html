@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Logos — Salvare</title>
+<style>
+  :root{
+    --fundal:#0d1117; --panou:#161b22; --linie:#21262d; --linie-clar:#30363d;
+    --text:#c9d1d9; --stins:#8b949e; --accent:#58a6ff; --cald:#d29922;
+    --verde:#3fb950; --rosu:#f85149;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:20px 16px 60px; background:var(--fundal); color:var(--text);
+    font-family:var(--mono); font-size:15px; line-height:1.55;
+    -webkit-text-size-adjust:100%;
+  }
+  .lat{max-width:680px;margin:0 auto}
+  h1{font-size:1.15rem;font-weight:600;margin:0 0 4px;letter-spacing:.02em}
+  .sub{color:var(--stins);font-size:.82rem;margin:0 0 22px}
+  section{
+    background:var(--panou); border:1px solid var(--linie); border-radius:10px;
+    padding:14px 16px; margin-bottom:14px;
+  }
+  h2{
+    font-size:.72rem; font-weight:600; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--stins); margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--linie);
+  }
+  .rand{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:.86rem}
+  .rand .et{color:var(--stins);flex:0 0 auto}
+  .rand .va{text-align:right;word-break:break-all}
+  .da{color:var(--verde)} .nu{color:var(--rosu)} .poate{color:var(--cald)}
+
+  /* AMPRENTELE — inima paginii. Două ștampile care ori se potrivesc, ori nu. */
+  .amprente{display:flex;align-items:stretch;gap:10px;margin:6px 0 14px}
+  .amp{
+    flex:1; text-align:center; padding:14px 8px; border-radius:8px;
+    border:1px dashed var(--linie-clar); background:#0d1117;
+  }
+  .amp .cap{font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--stins)}
+  .amp .val{font-size:1.5rem;letter-spacing:.16em;margin-top:6px;color:var(--stins)}
+  .amp.gasit .val{color:var(--accent)}
+  .amp.gasit{border-style:solid;border-color:var(--accent)}
+  .intre{display:flex;align-items:center;font-size:1.3rem;color:var(--stins)}
+  .verdict{padding:11px 13px;border-radius:8px;font-size:.87rem;line-height:1.5}
+  .verdict.bun{background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.4);color:#7ee787}
+  .verdict.rau{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.4);color:#ff9d96}
+  .verdict.astept{background:#0d1117;border:1px solid var(--linie-clar);color:var(--stins)}
+
+  label{display:block;font-size:.76rem;color:var(--stins);margin:12px 0 5px}
+  input[type=password],input[type=text]{
+    width:100%;padding:11px 12px;background:#0d1117;color:var(--text);
+    border:1px solid var(--linie-clar);border-radius:7px;font-family:var(--mono);font-size:16px;
+  }
+  input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  button{
+    width:100%;padding:12px;margin-top:12px;background:var(--accent);color:#04121f;
+    border:0;border-radius:7px;font-family:var(--mono);font-size:.92rem;font-weight:600;
+  }
+  button:disabled{background:var(--linie-clar);color:var(--stins)}
+  button.sec{background:transparent;color:var(--accent);border:1px solid var(--linie-clar)}
+  input[type=file]{font-size:.8rem;color:var(--stins);width:100%}
+  .lista{
+    max-height:190px;overflow:auto;background:#0d1117;border:1px solid var(--linie);
+    border-radius:7px;padding:9px 11px;font-size:.76rem;color:var(--stins);margin-top:10px;
+  }
+  .lista div{padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  details{margin-top:12px;font-size:.82rem}
+  summary{color:var(--accent);cursor:pointer;padding:6px 0}
+  .nota{font-size:.76rem;color:var(--stins);margin-top:10px;line-height:1.5}
+  code{background:#0d1117;padding:1px 5px;border-radius:4px;font-size:.9em;color:var(--cald)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="lat">
+
+  <h1>Logos — Salvare</h1>
+  <p class="sub">Această pagină doar citește. Nu scrie, nu șterge, nu schimbă nimic.<br>
+  Trebuie deschisă la <b>aceeași adresă</b> ca Logos, și în <b>fiecare loc</b> de unde îl deschizi:
+  fila Safari și pictograma de pe ecranul principal sunt două sertare diferite.</p>
+
+  <section>
+    <h2>1 · Ce e în sertarul acesta</h2>
+    <div id="scan"><div class="rand"><span class="et">se citește…</span></div></div>
+    <div id="fisiere"></div>
+    <details id="det-sare" hidden>
+      <summary>Arată sarea (păstreaz-o lângă backup)</summary>
+      <div class="nota">Fără șirul acesta, niciun backup făcut de aici nu mai poate fi deschis vreodată.
+      Copiază-l și ține-l separat.</div>
+      <input type="text" id="sare-brut" readonly onclick="this.select()">
+    </details>
+  </section>
+
+  <section>
+    <h2>2 · Backup-ul</h2>
+    <input type="file" id="fis" accept=".json,application/json">
+    <div class="amprente">
+      <div class="amp" id="amp-b"><div class="cap">cere cheia</div><div class="val" id="v-b">····</div></div>
+      <div class="intre" id="semn">≠</div>
+      <div class="amp" id="amp-l"><div class="cap">cheia de aici</div><div class="val" id="v-l">····</div></div>
+    </div>
+    <div class="verdict astept" id="verdict">Alege fișierul de backup.</div>
+  </section>
+
+  <section>
+    <h2>3 · Deschide-l</h2>
+    <label for="parola">Parola master (cea de la momentul backup-ului)</label>
+    <input type="password" id="parola" autocomplete="current-password">
+    <button id="go" disabled>Decriptează</button>
+    <div class="verdict astept" id="rez" style="margin-top:12px">Aștept fișierul și parola.</div>
+    <div id="continut"></div>
+
+    <details>
+      <summary>Am sarea din altă parte</summary>
+      <div class="nota">Dintr-un backup al telefonului, de pe alt dispozitiv sau dintr-o copie salvată mai demult.
+      Lipește valoarea <code>sare</code> din <code>logos_lacat</code>.</div>
+      <label for="sare-man">Sare (base64)</label>
+      <input type="text" id="sare-man" placeholder="ex: k3Jd8…">
+      <label for="iter-man">Iterații</label>
+      <input type="text" id="iter-man" value="310000">
+      <button class="sec" id="go-man">Decriptează cu sarea aceasta</button>
+    </details>
+  </section>
+
+</div>
+
+<script>
+const CHEIE_LS='logos_lacat', CHEIE_MIG='logos_migrare';
+const NUME_BD='logos_depozit', MAGAZIE='fisiere';
+const ITERATII=310000, PREFIX='LZE2:', PREFIX_V1='LZE1:';
+
+const $=id=>document.getElementById(id);
+function b642buf(s){const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u.buffer;}
+function buf2b64(buf){const o=new Uint8Array(buf);let s='';for(let i=0;i<o.length;i+=0x8000)s+=String.fromCharCode.apply(null,o.subarray(i,i+0x8000));return btoa(s);}
+function oct(n){return n<1024?n+' o':n<1048576?(n/1024).toFixed(1)+' Ko':(n/1048576).toFixed(1)+' Mo';}
+function rand(et,va,cls){return '<div class="rand"><span class="et">'+et+'</span><span class="va '+(cls||'')+'">'+va+'</span></div>';}
+
+async function amprenta(sareBuf){
+  const h=await crypto.subtle.digest('SHA-256',sareBuf);
+  return Array.from(new Uint8Array(h).slice(0,4)).map(o=>o.toString(16).padStart(2,'0')).join('');
+}
+async function derivaCheie(parola,sareBuf,iteratii){
+  const m=await crypto.subtle.importKey('raw',new TextEncoder().encode(parola),{name:'PBKDF2'},false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt:sareBuf,iterations:iteratii,hash:'SHA-256'},
+    m,{name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+}
+async function descuie(pachet,cheie){            // "iv.cifrat" -> text clar
+  const [iv,ct]=pachet.split('.');
+  const clar=await crypto.subtle.decrypt({name:'AES-GCM',iv:b642buf(iv)},cheie,b642buf(ct));
+  return new TextDecoder().decode(clar);
+}
+
+let ampLocal=null, ampBackup=null, dateBackup=null, lacat=null;
+
+/* ---------- 1. Scanare, fără să atingem nimic ---------- */
+(async function scaneaza(){
+  let h='';
+  try{ lacat=JSON.parse(localStorage.getItem(CHEIE_LS)||'null'); }catch(e){ lacat=null; }
+
+  if(lacat && lacat.sare){
+    ampLocal=await amprenta(b642buf(lacat.sare));
+    h+=rand('lacăt (logos_lacat)','există','da');
+    h+=rand('amprenta cheii',ampLocal,'da');
+    h+=rand('iterații',lacat.iteratii||ITERATII);
+    $('v-l').textContent=ampLocal; $('amp-l').classList.add('gasit');
+    $('det-sare').hidden=false; $('sare-brut').value=lacat.sare;
+  }else{
+    h+=rand('lacăt (logos_lacat)','lipsește','nu');
+    h+='<div class="nota">Aici nu a existat niciodată o parolă, sau stocarea a fost golită. '+
+       'Backup-urile făcute din alt sertar nu se pot deschide de aici.</div>';
+  }
+
+  let mig=null;
+  try{ mig=JSON.parse(localStorage.getItem(CHEIE_MIG)||'null'); }catch(e){}
+  if(mig) h+=rand('schimbare de parolă neterminată','da — cheia veche e păstrată','poate');
+
+  // depozitul: câte fișiere mai sunt acolo, chiar dacă nu se pot citi
+  try{
+    let exista=true;
+    if(indexedDB.databases){
+      const l=await indexedDB.databases();
+      exista=l.some(b=>b.name===NUME_BD);
+    }
+    if(!exista){
+      h+=rand('depozit (IndexedDB)','nu există','nu');
+    }else{
+      const bd=await new Promise((rez,resp)=>{
+        const c=indexedDB.open(NUME_BD); c.onsuccess=e=>rez(e.target.result); c.onerror=()=>resp();
+      });
+      if(!bd.objectStoreNames.contains(MAGAZIE)){
+        h+=rand('depozit (IndexedDB)','gol','nu');
+      }else{
+        const recs=await new Promise((rez,resp)=>{
+          const c=bd.transaction(MAGAZIE,'readonly').objectStore(MAGAZIE).getAll();
+          c.onsuccess=e=>rez(e.target.result||[]); c.onerror=()=>resp();
+        });
+        h+=rand('fișiere în depozit',recs.length, recs.length?'da':'nu');
+        if(recs.length){
+          const ids=new Set();
+          for(const r of recs){
+            const c=r.continut;
+            if(typeof c==='string' && c.startsWith(PREFIX)) ids.add(c.slice(PREFIX.length).split(':')[0]);
+            else if(typeof c==='string' && c.startsWith(PREFIX_V1)) ids.add('LZE1');
+          }
+          if(ids.size) h+=rand('închise cu cheia',[...ids].join(', '),'poate');
+          let l='<div class="lista">';
+          for(const r of recs.slice(0,200))
+            l+='<div>'+(r.cale||'?')+'  ·  '+oct((r.continut||'').length)+'</div>';
+          $('fisiere').innerHTML=l+'</div>';
+        }
+      }
+      bd.close();
+    }
+  }catch(e){ h+=rand('depozit (IndexedDB)','nu am putut citi','poate'); }
+
+  try{
+    if(navigator.storage&&navigator.storage.persisted)
+      h+=rand('stocare persistentă', await navigator.storage.persisted()?'activă':'INACTIVĂ',
+              await navigator.storage.persisted()?'da':'nu');
+  }catch(e){}
+
+  $('scan').innerHTML=h;
+  compara();
+})();
+
+/* ---------- 2. Backup-ul ---------- */
+$('fis').addEventListener('change',async()=>{
+  const f=$('fis').files[0]; if(!f) return;
+  const txt=await f.text();
+  let inv;
+  try{ inv=JSON.parse(txt); }
+  catch(e){ setVerdict('rau','Fișierul nu e JSON. Ai ales fișierul potrivit?'); return; }
+
+  if(inv.logos_backup && !inv.logos_backup_criptat){
+    dateBackup=null;
+    setVerdict('bun','Backup NECRIPTAT — nu are nevoie de parolă. Îl poți încărca direct în Logos cu comanda „incarca".');
+    return;
+  }
+  if(!inv.logos_backup_criptat || typeof inv.data!=='string'){
+    setVerdict('rau','Nu e un backup Logos.'); return;
+  }
+  dateBackup=inv.data;
+  if(dateBackup.startsWith(PREFIX)){
+    ampBackup=dateBackup.slice(PREFIX.length).split(':')[0];
+    $('v-b').textContent=ampBackup; $('amp-b').classList.add('gasit');
+  }else{
+    ampBackup='LZE1'; $('v-b').textContent='v1'; $('amp-b').classList.add('gasit');
+  }
+  compara();
+});
+
+function setVerdict(cls,txt){ const v=$('verdict'); v.className='verdict '+cls; v.textContent=txt; }
+
+function compara(){
+  $('go').disabled=!dateBackup;
+  if(!ampBackup) return;
+  if(!ampLocal){
+    $('semn').textContent='≠';
+    setVerdict('rau','Sertarul acesta nu are nicio cheie. Deschide pagina și din celălalt loc — fila Safari, dacă acum ești în aplicația de pe ecranul principal, sau invers.');
+    return;
+  }
+  if(ampBackup===ampLocal || ampBackup==='LZE1'){
+    $('semn').textContent='=';
+    setVerdict('bun','Se potrivesc. Cheia care a închis backup-ul e chiar aici — scrie parola mai jos.');
+  }else{
+    $('semn').textContent='≠';
+    setVerdict('rau','Altă cheie. Backup-ul a fost făcut în alt sertar sau înainte de o schimbare de parolă. Încearcă pagina din celălalt loc înainte de orice altceva.');
+  }
+}
+
+/* ---------- 3. Decriptarea ---------- */
+async function incearca(sareB64,iteratii){
+  const parola=$('parola').value;
+  if(!dateBackup){ setRez('rau','Alege întâi fișierul de backup.'); return; }
+  if(!parola){ setRez('rau','Scrie parola.'); return; }
+  setRez('astept','Se derivează cheia… durează câteva secunde.');
+  await new Promise(r=>setTimeout(r,50));
+
+  const corp=dateBackup.startsWith(PREFIX)
+    ? dateBackup.slice(PREFIX.length).slice(dateBackup.slice(PREFIX.length).indexOf(':')+1)
+    : dateBackup.slice(PREFIX_V1.length);
+
+  const chei=[];
+  try{
+    const cheie=await derivaCheie(parola,b642buf(sareB64),iteratii);
+    chei.push(['parola de acum',cheie]);
+    // dacă o schimbare de parolă a rămas la mijloc, cheia veche stă învelită în cea nouă
+    let mig=null; try{ mig=JSON.parse(localStorage.getItem(CHEIE_MIG)||'null'); }catch(e){}
+    if(mig&&mig.cheieVecheInvelita){
+      try{
+        const [iv,ct]=mig.cheieVecheInvelita.split('.');
+        const brut=await crypto.subtle.decrypt({name:'AES-GCM',iv:b642buf(iv)},cheie,b642buf(ct));
+        chei.push(['cheia veche, din migrare',
+          await crypto.subtle.importKey('raw',brut,{name:'AES-GCM'},true,['decrypt'])]);
+      }catch(e){}
+    }
+  }catch(e){ setRez('rau','Sarea nu e base64 valid.'); return; }
+
+  for(const [nume,cheie] of chei){
+    try{
+      const clar=await descuie(corp,cheie);
+      const pachet=JSON.parse(clar);
+      arata(pachet,nume);
+      return;
+    }catch(e){}
+  }
+  setRez('rau','Nu se deschide. Ori parola e alta, ori sarea nu e cea care trebuie. Amprenta de sus îți spune care dintre ele.');
+}
+
+function setRez(cls,txt){ const r=$('rez'); r.className='verdict '+cls; r.textContent=txt; }
+
+function arata(pachet,cumL){
+  const fis=pachet.fisiere||[];
+  setRez('bun','Deschis, cu '+cumL+'. '+fis.length+' fișier(e), din '+(pachet.data||'?').slice(0,10)+'.');
+  let l='<div class="lista">';
+  for(const f of fis.slice(0,300)) l+='<div>'+(f.cale||'?')+'</div>';
+  l+='</div>';
+  l+='<button id="salv">Salvează varianta descifrată</button>'+
+     '<div class="nota">Fișierul descărcat NU e criptat — are toate datele tale în clar. '+
+     'Încarcă-l în Logos cu <code>incarca</code> (îl acceptă și așa), apoi șterge-l din Descărcări.</div>';
+  $('continut').innerHTML=l;
+  $('salv').onclick=()=>{
+    const b=new Blob([JSON.stringify(pachet)],{type:'application/json'});
+    const u=URL.createObjectURL(b), a=document.createElement('a');
+    a.href=u; a.download='logos-backup-DESCIFRAT.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),1000);
+  };
+}
+
+$('go').onclick=()=>{
+  if(!lacat||!lacat.sare){ setRez('rau','Nu e nicio sare aici. Folosește „Am sarea din altă parte".'); return; }
+  incearca(lacat.sare, lacat.iteratii||ITERATII);
+};
+$('go-man').onclick=()=>{
+  const s=$('sare-man').value.trim();
+  if(!s){ setRez('rau','Lipește sarea întâi.'); return; }
+  incearca(s, parseInt($('iter-man').value,10)||ITERATII);
+};
+</script>
+</body>
+</html>
